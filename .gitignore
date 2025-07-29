@@ -3,6 +3,7 @@
 __pycache__/
 venv/
 tasks/
+README.md
 .DS_Store
 sandbox.py
 tasks.py
