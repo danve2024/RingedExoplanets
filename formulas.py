@@ -215,7 +215,7 @@ def light_curve(data: list) -> list:
 
     ans = []
 
-    intensities = [data[i][1] for i in data]
+    intensities = [i[1] for i in data]
 
     initial_intensity = min(intensities) # I_min
 

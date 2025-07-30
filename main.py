@@ -22,14 +22,15 @@ defaults = {
     'sma': Measure(5e5, 5e6, km, label='a'),  # Dependent slider
     'width': Measure(1e4, 1e6, km, label='w'), # Dependent slider
     'mass': Measure(0.1, 10, kg, label='m'), # Dependent slider
-    'obliquity': Measure(0, 90, deg, label='θ'),
+    'obliquity': Measure(-90, 90, deg, label='θ'),
     'azimuthal_angle': Measure(0, 360, deg, label='φ'),
     'argument_of_periapsis': Measure(0, 360, deg, label='ψ'),
     'star_radius': 700_000 * km,
     'star_temperature': 5500 * K,
     'star_log(g)': 3,
     'wavelength': 3437 * angstrom,
-    'band': 'V'
+    'band': 'V (quadratic)',
+    'limb_darkening': 'quadratic'
 }
 
 # Graphics

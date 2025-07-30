@@ -13,7 +13,7 @@ import numpy as np
 from measure import Measure
 from units import *
 from formulas import *
-from space import Exoplanet, Rings, Star, hill_sphere
+from space import Exoplanet, Rings, Star
 from models import transit_animation
 from observations import Observations
 
@@ -62,7 +62,7 @@ class Selection(QWidget):
         self.mins = {}
         self.maxs = {}
 
-        self.dependent_sliders = ['sma', 'width', 'ring_mass']
+        self.dependent_sliders = ['sma', 'width', 'mass', 'density']
         self.user_values['other'] = {}
 
         # Predefined values
@@ -79,7 +79,8 @@ class Selection(QWidget):
         self.user_values['other']['star_temperature'] = 5500 * K
         self.user_values['other']['log_g'] = 3
         self.user_values['other']['wavelength'] = 3437 * angstrom
-        self.user_values['other']['band'] = 'V'
+        self.user_values['other']['band'] = 'V (quadratic)'
+        self.user_values['other']['limb_darkening'] = 'quadratic'
 
         self.init_ui()
 
@@ -125,7 +126,7 @@ class Selection(QWidget):
                     max_input.addItems(['Hill Sphere', 'Roche Limit'])
                     max_input.setEditable(True)
                     max_input.currentTextChanged.connect(self.set_sma_end)
-                elif param == 'ring_mass':
+                elif param == 'mass':
                     # Min and Max Dropdowns
                     min_input = QComboBox()
                     min_input.addItem('Auto')
@@ -140,6 +141,13 @@ class Selection(QWidget):
                     min_input = QLineEdit(str(10.))
                     max_input = QComboBox()
                     max_input.addItem('Maximum Possible')
+                    max_input.setEditable(True)
+                    max_input.currentTextChanged.connect(self.set_width_end)
+                elif param == 'density':
+                    # Min Input and Max Dropdown
+                    min_input = QLineEdit(str(10.))
+                    max_input = QComboBox()
+                    max_input.addItem('Roche Critical Density')
                     max_input.setEditable(True)
                     max_input.currentTextChanged.connect(self.set_width_end)
                 else:
@@ -161,35 +169,45 @@ class Selection(QWidget):
 
             else: # One-value parameters
                 options = {
-                    'star_temperature': ['5500', '6000', '7000', '8000', '10000', '15000', '20000'],
-                    'star_log(g)': ['3', '4'],
-                    'star_angular_diameter': ['0.8'],
-                    'wavelength': ['3437', '4212', '4687', '5475', '6975']
+                    'star_radius': ['700000'],
+                    'star_temperature': ['4000 (quadratic)', '4500 (quadratic)', '4600 (quadratic)', '4700 (quadratic)', '5300 (quadratic)', '5460 (quadratic)', '5500 (quadratic and square-root)', '5780 (quadratic)', '6000 (quadratic and square-root)', '6020 (quadraric)', '6300 (quadratic)', '6730 (quadratic)', '7000 (square-root)', '8000 (square-root)', '10000 (square-root)', '15000 (square-root)', '20000 (square-root)'],
+                    'star_log(g)': ['2.00 (quadratic)', '2.50 (quadratic)', '3.00 (quadratic and square-root)', '3.44 (quadratic)', '3.50 (quadratic)', '4.00 (quadratic or square-root)', '4.44 (quadratic)', '4.50 (quadratic)', '4.60 (quadratic)'],
+                    'wavelength': ['3437 (square-root)', '4212 (square-root)', '4687 (square-root)', '5475 (square-root)', '6975 (square-root)'],
+                    'band': ['u (quadratic)', 'b (quadratic)', 'v (quadratic)', 'y (quadratic)', 'U (quadratic)', 'B (quadratic)', 'V (quadratic)'],
+                    'limb_darkening': ['quadratic', 'square-root']
                 }
 
+                def set_star_radius(value):
+                    self.user_values['other']['angular_size'] = int(value.split()[0]) * km
+
                 def set_star_temperature(value):
-                    self.user_values['other']['temperature'] = int(value)
+                    self.user_values['other']['temperature'] = int(value.split()[0])
 
                 def set_star_log_g(value):
-                    self.user_values['other']['log_g'] = int(value)
-
-                def set_star_angular_diameter(value):
-                    self.user_values['other']['angular_size'] = float(value) * arcsec
+                    self.user_values['other']['log_g'] = float(value.split()[0])
 
                 def set_wavelength(value):
-                    self.user_values['other']['wavelength'] = int(value)
+                    self.user_values['other']['wavelength'] = int(value.split()[0])
+
+                def set_band(value):
+                    self.user_values['other']['band'] = value.split()[0]
+
+                def set_limb_darkening(value):
+                    self.user_values['other']['limb_darkening'] = value.split()[0]
 
                 actions = {
+                    'star_radius': set_star_radius,
                     'star_temperature': set_star_temperature,
                     'star_log(g)': set_star_log_g,
-                    'star_angular_diameter': set_star_angular_diameter,
-                    'wavelength': set_wavelength
+                    'wavelength': set_wavelength,
+                    'band': set_band,
+                    'limb_darkening': set_limb_darkening
                 }
 
                 dropdown = QComboBox()
                 dropdown.addItems(options[param])
                 dropdown.currentTextChanged.connect(actions[param])
-                if param == 'star_angular_diameter':
+                if param == 'star_radius':
                     dropdown.setEditable(True)
                 layout.addWidget(dropdown, row, 1)
 
@@ -208,18 +226,24 @@ class Selection(QWidget):
     def get_unit_label(name: str) -> str:
         """Get the unit label for a given parameter"""
         units = {
-            'radius': 'km',
-            'density': 'g/cm³',
-            'ring_density': 'g/cm³',
             'exoplanet_sma': 'au',
+            'exoplanet_orbit_eccentricity': '',
+            'exoplanet_orbit_inclination': 'deg',
+            'exoplanet_argument_of_periapsis': 'deg',
+            'exoplanet_radius': 'km',
+            'exoplanet_mass': 'kg',
+            'density': 'g/cm³',
+            'eccentricity': '',
             'sma': 'km',
             'width': 'km',
-            'ring_mass': 'kg',
-            'eccentricity': '',
-            'inclination': 'deg',
+            'mass': 'kg',
+            'obliquity': 'deg',
+            'azimuthal_angle': 'deg',
+            'argument_of_periapsis': 'deg',
+            'star_radius': 'km',
             'star_temperature': 'K',
+            'star_log(g)': '',
             'wavelength': 'Å',
-            'star_angular_diameter': "''"
         }
         return units.get(name, '')
 
@@ -258,6 +282,8 @@ class Selection(QWidget):
 
                     if param == 'width':
                         self.user_values['other']['width_start'] = float(self.mins[param].text())
+                    elif param == 'density':
+                        self.user_values['other']['density_start'] = float(self.mins[param].text())
 
                 else:  # Manual selected
                     min_val = float(self.mins[param].text())
@@ -333,13 +359,13 @@ class Model(QWidget):
         if observations_file is None:
             self.observations = None
         else:
-            self.observations = Observations(observations_file) # Working with the observation data if it is available
+            self.observations = Observations(observations_file) # Working with the observation data if it is loaded
 
         self.magnitude_shift = None
         self.magnitude_calibrating = None
-        self.phase_shift = None
+        self.time_shift = None
         self.magnitude_shift_label = None
-        self.phase_shift_label = None
+        self.time_shift_label = None
         self.magnitude_calibrating_label = None
 
         self.setWindowTitle("Ringed Exoplanet Transit Simulation")
@@ -353,14 +379,17 @@ class Model(QWidget):
         self.params = parameters.pop('other')
         self.sma_start = self.params['sma_start']
         self.sma_end = self.params['sma_end']
+        self.density_start = self.params['density_start']
+        self.density_end = self.params['density_end']
         self.ring_mass_start = self.params['ring_mass_start']
         self.ring_mass_end = self.params['ring_mass_end']
         self.width_start = self.params['width_start']
         self.width_end = self.params['width_end']
-        self.temperature = self.params['temperature']
+        self.temperature = self.params['star_temperature']
         self.log_g = self.params['log_g']
-        self.angular_size = self.params['angular_size']
+        self.star_radius = self.params['star_radius']
         self.wavelength = self.params['wavelength']
+        self.band = self.params['band']
         self.defaults = parameters
 
         # Create sliders
@@ -387,11 +416,11 @@ class Model(QWidget):
             self.phase_shift_slider()
 
         # Additional parameters
-        data_label = QLabel(f"T: {self.temperature}K    log(g): {self.log_g}    ρ: {self.angular_size / arcsec}''    λ: {self.wavelength}Å")
+        data_label = QLabel(f"R: {self.star_radius}    T: {self.temperature}K    log(g): {self.log_g}    λ: {self.wavelength}Å")
         self.layout.addWidget(data_label, alignment=Qt.AlignmentFlag.AlignLeft)
 
         # Show animation button
-        self.animation_button = QPushButton("Simulate transit Animation")
+        self.animation_button = QPushButton("Simulate Transit Animation")
         self.animation_button.clicked.connect(self.show_animation_window)
         self.layout.addWidget(self.animation_button, alignment=Qt.AlignmentFlag.AlignRight)
 
@@ -465,7 +494,7 @@ class Model(QWidget):
         self.magnitude_calibrating = slider
         self.magnitude_calibrating_label = value_label
 
-    def phase_shift_slider(self):
+    def time_shift_slider(self):
         """
         A slider for selecting the moment of the observations to compare with the model. The observation data is cropped by the x-axis and moved for the specific time span selected.
         """
@@ -484,22 +513,30 @@ class Model(QWidget):
 
         self.layout.addLayout(container)
 
-        self.phase_shift = slider
-        self.phase_shift_label = value_label
+        self.time_shift = slider
+        self.time_shift_label = value_label
 
-    @staticmethod
     def get_unit_label(name: str) -> str:
         """Get the unit label for a given parameter"""
         units = {
-            'radius': 'km',
-            'density': 'g/cm³',
-            'ring_density': 'g/cm³',
             'exoplanet_sma': 'au',
+            'exoplanet_orbit_eccentricity': '',
+            'exoplanet_orbit_inclination': 'deg',
+            'exoplanet_argument_of_periapsis': 'deg',
+            'exoplanet_radius': 'km',
+            'exoplanet_mass': 'kg',
+            'density': 'g/cm³',
+            'eccentricity': '',
             'sma': 'km',
             'width': 'km',
-            'ring_mass': 'kg',
-            'eccentricity': '',
-            'inclination': 'deg',
+            'mass': 'kg',
+            'obliquity': 'deg',
+            'azimuthal_angle': 'deg',
+            'argument_of_periapsis': 'deg',
+            'star_radius': 'km',
+            'star_temperature': 'K',
+            'star_log(g)': '',
+            'wavelength': 'Å',
         }
         return units.get(name, '')
 
@@ -515,7 +552,7 @@ class Model(QWidget):
 
         params['temperature'] = self.temperature
         params['log_g'] = self.log_g
-        params['angular_size'] = self.angular_size
+        params['star_radius'] = self.star_radius
         params['wavelength'] = self.wavelength
 
         self.update_dependent_sliders(params)
@@ -523,14 +560,14 @@ class Model(QWidget):
         data, transit_period, self.star, self.exoplanet = self.calculate_data(**params)
 
         if self.observations is not None: # shifting (magnitude to magnitude change and time to phase) and normalizing (time to phase) the observation data
-            phase_shift = self.phase_shift.value() / 100
+            phase_shift = self.time_shift.value() / 100
             magnitude_shift = self.magnitude_shift.value()
             magnitude_calibrating = self.magnitude_calibrating.value() / 1000
-            self.phase_shift_label.setText(str(phase_shift))
+            self.time_shift_label.setText(str(phase_shift))
             self.magnitude_shift_label.setText(str(magnitude_shift))
             self.magnitude_calibrating_label.setText(str(magnitude_calibrating))
 
-            self.observations.normalize_and_shift(transit_period, phase_shift, magnitude_shift + magnitude_calibrating)
+            self.observations.shift(transit_period, phase_shift, magnitude_shift + magnitude_calibrating)
 
         self.ax.clear()
         self.ax.set_title("Simulation Result")
@@ -567,28 +604,30 @@ class Model(QWidget):
 
     def update_dependent_sliders(self, params: dict) -> None:
         """Update the dependent sliders (ring mass and semi-major axis)"""
-        radius = params['radius'].set(km)
-        density = params['density'].set(gcm3)
-        ring_density = params['ring_density'].set(gcm3)
+        exoplanet_radius = params['exoplanet_radius'].set(km)
+        exoplanet_mass = params['exoplanet_density'].set(gcm3)
+        ring_eccentricity = params['ring_eccentricity']
+        ring_density = params['density'].set(gcm3)
         exoplanet_sma = params['exoplanet_sma'].set(au)
+        exoplanet_orbit_eccentricity = params['exoplanet_orbit_eccentricity']
 
-        V = volume(radius)  # exoplanet volume
-        M = V * density  # exoplanet mass
+        exoplanet_density = exoplanet_mass / volume(exoplanet_radius)
 
-        a_roche = max(roche_radius(radius, density, ring_density), radius)
-        a_hill = hill_sphere(exoplanet_sma, M)
+        a_roche_min = max(roche_sma_min(exoplanet_radius, exoplanet_density, ring_eccentricity, ring_density), exoplanet_radius)
+        a_roche_max = roche_sma_max(exoplanet_radius, exoplanet_density, ring_eccentricity, ring_density)
+        a_hill = hill_sma(exoplanet_sma, exoplanet_orbit_eccentricity, exoplanet_mass, star_mass(self.log_g, self.star_radius), exoplanet_mass)
 
         # Working with dropdowns
 
         if self.sma_start == 'Exoplanet Radius':
-            a_min = radius
+            a_min = exoplanet_radius
         elif self.sma_start == 'Roche Limit':
-            a_min = a_roche
+            a_min = a_roche_min
         else:
             a_min = float(self.sma_start) * km
 
         if self.sma_end == 'Roche Limit':
-            a_max = a_roche
+            a_max = a_roche_max
         elif self.sma_end == 'Hill Sphere':
             a_max = a_hill
         else:

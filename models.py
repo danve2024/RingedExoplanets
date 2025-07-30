@@ -3,11 +3,8 @@ import math
 from PyQt6.QtGui import QImage
 import matplotlib.pyplot as plt
 import numpy as np
-from math import sin, cos, sqrt, radians
 
-from formulas import light_curve
-from measure import Measure
-from typing import Union
+from formulas import light_curve, mean_anomaly, eccentric_anomaly, true_anomaly, radius_vector
 
 """
 Uses numpy arrays to model the event of the transit
@@ -45,102 +42,86 @@ def disk(radius: float, size: float = None) -> np.ndarray:
 
 # must be edited
 def elliptical_ring(
-        size: Union[float, Measure.Unit],
-        a: Union[float, Measure.Unit],
-        e: Union[float, Measure.Unit],
-        w: Union[float, Measure.Unit],
-        obliquity: Union[float, Measure.Unit],
-        azimuthal_angle: Union[float, Measure.Unit],
-        argument_of_periapsis: Union[float, Measure.Unit],
-        fill: float,
-        focus: tuple = None) -> np.array:
+        size: int,
+        a: float,
+        e: float,
+        w: float,
+        obliquity: float,
+        azimuthal_angle: float,
+        argument_of_periapsis: float,
+        fill: float) -> np.array:
     """
-    Draws an elliptical ring using standard orbital parameters for orientation
+    See equations 2.2.3 - 2.2.23.
+    Draws an elliptical ring using standard orbital parameters for orientation.
 
-    :param size: matrix size (used for matrix concatenation)
-    :param a: ring semi-major axis (in pixel units)
-    :param e: ring eccentricity
-    :param w: ring width (in pixel units)
-    :param obliquity: inclination angle (i) in degrees
-    :param azimuthal_angle: longitude of ascending node (Ω) in degrees
-    :param argument_of_periapsis: argument of periapsis (ω) in degrees
-    :param fill: ring fill percentage (depends on the absorption coefficient)
-    :param focus: focus coordinates of the ring (in pixel units)
+    :param size: χ_a
+    :param a: α
+    :param e: e
+    :param w: χ_w
+    :param obliquity: θ
+    :param azimuthal_angle: φ
+    :param argument_of_periapsis: ψ
+    :param fill: τ
     :return: numpy array with an elliptical ring of specified parameters
     """
 
-    size = int(round(size))
+    inclination_rad = np.deg2rad(90.0 - obliquity) # υ
+    azimuthal_angle_rad = np.deg2rad(azimuthal_angle)
+    arg_peri_rad = np.deg2rad(argument_of_periapsis)
 
-    if size == 0:
-        return np.ones((1, 1))
+    a_outer = a + w / 2.0 # α_outer
+    a_inner = a - w / 2.0 # α_inner
 
-    if size % 2 == 0:
-        size -= 1
+    # Rotational matrices
+    R_azimuthal_angle = np.array([
+        [np.cos(azimuthal_angle_rad), 0, np.sin(azimuthal_angle_rad)],
+        [0, 1, 0],
+        [-np.sin(azimuthal_angle_rad), 0, np.cos(azimuthal_angle_rad)]
+    ]) # R_φ
+    R_obliquity = np.array([
+        [1, 0, 0],
+        [0, np.cos(inclination_rad), np.sin(inclination_rad)],
+        [0, -np.sin(inclination_rad), np.cos(inclination_rad)]
+    ]) # R_θ
+    R_arg_peri = np.array([
+        [np.cos(arg_peri_rad), -np.sin(arg_peri_rad), 0],
+        [np.sin(arg_peri_rad), np.cos(arg_peri_rad), 0],
+        [0, 0, 1] # R_ψ
+    ])
 
-    shape = (size, size)
-    a = float(a)
-    w = float(w)
+    R = R_azimuthal_angle @ R_obliquity @ R_arg_peri # R
 
-    if focus is None:
-        cxy = (size - 1) / 2.0
-        focus = (cxy, cxy)
-    fy, fx = focus
-    c = e * a
-    b0 = sqrt(a ** 2 - c ** 2)
+    L = np.linspace(-size / 2, size / 2, size) # L
+    X, Y = np.meshgrid(L, L) # X, Y
 
-    # Create grid
-    y, x = np.ogrid[:size, :size]
-    x_centered = x - fx
-    y_centered = y - fy
+    m11, m12, m21, m22 = R[0, 0], R[0, 1], R[1, 0], R[1, 1]
+    det_N = m11 * m22 - m12 * m21 # N - 2x2 R submatrix in the upper left corner
 
-    # Convert angles to radians
-    i = radians(inclination)
-    Ω = radians(omega)
-    ω = radians(argument)
+    if np.isclose(det_N, 0):
+        return np.ones((size, size), dtype=float)
 
-    # Apply rotations in the correct order:
-    # 1. Rotate by argument of periapsis (ω) around z-axis
-    # 2. Rotate by inclination (i) around x-axis
-    # 3. Rotate by longitude of ascending node (Ω) around z-axis
+    delta_x = (m22 * X - m12 * Y) / det_N # x - x_c
+    delta_y = (-m21 * X + m11 * Y) / det_N # y - y_c
 
-    # First rotation (argument of periapsis)
-    x_rot1 = x_centered * cos(ω) + y_centered * sin(ω)
-    y_rot1 = -x_centered * sin(ω) + y_centered * cos(ω)
+    radius_proj = np.sqrt(delta_x ** 2 + delta_y ** 2) # χ_r
+    true_anomaly_val = np.arctan2(delta_y, delta_x) # ν_ring
 
-    # Second rotation (inclination)
-    x_rot2 = x_rot1
-    y_rot2 = y_rot1 * cos(i)
-    # z component would be y_rot1 * sin(i), but we're projecting to 2D
+    denominator = 1 + e * np.cos(true_anomaly_val) # 1 + ecosν_ring
+    denominator[denominator <= 1e-9] = np.inf
 
-    # Third rotation (longitude of ascending node)
-    x_rot3 = x_rot2 * cos(Ω) + y_rot2 * sin(Ω)
-    y_rot3 = -x_rot2 * sin(Ω) + y_rot2 * cos(Ω)
+    radius_inner_theory = (a_inner * (1 - e ** 2)) / denominator # χ_inner
+    radius_outer_theory = (a_outer * (1 - e ** 2)) / denominator # χ_outer
 
-    # Apply the final rotated coordinates
-    x_final = x_rot3 - c  # subtracting c to account for eccentricity
-    y_final = y_rot3
+    ring_mask = (radius_proj >= radius_inner_theory) & (radius_proj <= radius_outer_theory)
 
-    # Calculate the projected semi-minor axis
-    b = b0 * sqrt(cos(i) ** 2 + (sin(i) * cos(Ω) ** 2))  # approximate projection
+    transmission_map = np.ones((size, size), dtype=float)
+    transmission_map[ring_mask] = fill
 
-    if abs(b) < 1e-12:
-        outer_mask = np.zeros(shape, dtype=bool)
-        inner_mask = np.zeros(shape, dtype=bool)
-    else:
-        outer_mask = (x_final / a) ** 2 + (y_final / b) ** 2 <= 1
-        a_inner = max(a - w, 1e-9)
-        b_inner = max(b - w, 1e-9)
-        inner_mask = (x_final / a_inner) ** 2 + (y_final / b_inner) ** 2 <= 1
-    ring_mask = outer_mask & ~inner_mask
-
-    arr = np.zeros(shape, dtype=float)
-    arr[ring_mask] = fill - 1
-
-    return arr
+    return transmission_map
 
 def quadratic_star_model(shape: list[int], coefficients: list[float]) -> np.array:
     """
-    See formulas 2.2.3 - 2.2.6.
+    See formulas 2.2.24 - 2.2.27.
     Creates a star model using the quadratic limb darkening approximation
     :param shape: n, k
     :param coefficients: γ_1, γ_2
@@ -171,7 +152,7 @@ def quadratic_star_model(shape: list[int], coefficients: list[float]) -> np.arra
     # Fill the matrix with normalized intensities
     for x in range(n):
         for y in range(k):
-            mu = cos(np.sqrt((x - center_x) ** 2 + (y - center_y) ** 2) / (n / 2) * math.pi / 2)
+            mu = np.cos(np.sqrt((x - center_x) ** 2 + (y - center_y) ** 2) / (n / 2) * math.pi / 2)
             if mu < 0:
                 mu = 0
             result[x, y] = 1 - u1 * (1 - mu) - u2 * (1 - mu) ** 2
@@ -183,7 +164,7 @@ def quadratic_star_model(shape: list[int], coefficients: list[float]) -> np.arra
 
 def square_root_star_model(shape: list[int], coefficients: list[float]) -> np.array:
     """
-    See formulas 2.2.3 - 2.2.5, 2.2.7.
+    See formulas 2.2.24 - 2.2.26, 2.2.28.
     Creates a star model using the square-root limb darkening approximation
     :param shape: n, k
     :param coefficients: γ_3, γ_4
@@ -214,7 +195,7 @@ def square_root_star_model(shape: list[int], coefficients: list[float]) -> np.ar
     # Fill the matrix with normalized intensities
     for x in range(n):
         for y in range(k):
-            mu = cos(np.sqrt((x - center_x) ** 2 + (y - center_y) ** 2) / n * math.pi)
+            mu = np.cos(np.sqrt((x - center_x) ** 2 + (y - center_y) ** 2) / n * math.pi)
             if mu < 0:
                 mu = 0
             result[x, y] = 1 - u3 * (1 - mu) - u4 * (1 - mu) ** 2
@@ -255,52 +236,106 @@ def crop(array: np.array, rows: int, shape: tuple[int] = None, end: bool = False
         return result
 
 # must be edited
-def transit(star: np.array, mask: np.array, initial: float) -> list:
+def transit(star: np.array, mask: np.array, period: float, eccentricity: float, sma: float, inclination: float, longitude_of_ascending_node: float, argument_of_periapsis: float,
+            steps: int = 500) -> list:
     """
-        Models the transit by masking the star array with the array of the exoplanet with rings
+    See formulas 2.1.13 - 2.1.16 and 2.2.30 - 2.2.53
+    Models the transit light curve based on orbital mechanics.
 
-        :param np.array star: the array of the star covered
-        :param np.array mask: the array of the covering exoplanet with its rings
-        :param float initial: the initial intensity of the star radiation
-        :return: the list of data used for drawing a lightcurve
+    :param star: The 2D array of the star.
+    :param mask: The 2D transmission mask of the exoplanet with rings.
+    :param period: P
+    :param eccentricity: e_p
+    :param sma: α_p
+    :param inclination: i
+    :param longitude_of_ascending_node: Ω
+    :param argument_of_periapsis: ω
+    :param steps: s
+    :return: Δm(t)
     """
+    initial_intensity = np.sum(star) # I_0
+    data_points = []
 
-    m, n = star.shape
-    n_cover = mask.shape[0]
+    # Define rotation matrices for the planet's orbit projection
+    standard_inclination_rad = np.deg2rad(90.0 - inclination)
+    lan_rad = np.deg2rad(longitude_of_ascending_node)
+    arg_peri_rad = np.deg2rad(argument_of_periapsis)
 
-    data = []
-    initial_intensity = initial  # calculating initial illuminance
-    cutout_intensity = np.sum(star)
+    R_omega = np.array([
+        [np.cos(arg_peri_rad), -np.sin(arg_peri_rad), 0],
+        [np.sin(arg_peri_rad), np.cos(arg_peri_rad), 0],
+        [0, 0, 1]
+    ]) # R_ω
+    R_i = np.array([
+        [1, 0, 0],
+        [0, np.cos(standard_inclination_rad), np.sin(standard_inclination_rad)],
+        [0, -np.sin(standard_inclination_rad), np.cos(standard_inclination_rad)]
+    ]) # R_i
+    R_Omega = np.array([
+        [np.cos(lan_rad), 0, np.sin(lan_rad)],
+        [0, 1, 0],
+        [-np.sin(lan_rad), 0, np.cos(lan_rad)]
+    ]) # R_Ω
+    R_orbit = R_Omega @ R_i @ R_omega # R_o
 
-    if mask.shape[1] != n:
-        raise ValueError(f"Mask array must have {n} columns to match the base array. But it has {mask.shape[1]}.")
+    h_star, w_star = star.shape # h_S, w_S
+    h_mask, w_mask = mask.shape # h, w
+    center_x_star, center_y_star = w_star // 2, h_star // 2 # x_c, y_c
 
-    for start_row in range(m - 1, -n_cover, -1):
-        result = star.copy()
+    # Iterate through time over one period, centered on the transit
+    time_points = np.linspace(-period / 2, period / 2, steps) # t
+    for t in time_points:
+        # Calculate orbital position
+        M_A = mean_anomaly(t, period)
+        E = eccentric_anomaly(M_A, eccentricity)
+        nu = true_anomaly(E, eccentricity)
+        r = radius_vector(sma, eccentricity, nu)
 
-        overlap_start = max(start_row, 0)
-        overlap_end = min(start_row + n_cover, m)
+        pos_in_orbit = np.array([r * np.cos(np.deg2rad(nu)), r * np.sin(np.deg2rad(nu)), 0]) # vector r
 
-        cover_start = overlap_start - start_row
-        cover_end = cover_start + (overlap_end - overlap_start)
+        pos_in_3d = R_orbit @ pos_in_orbit # vector p
+        px, py, pz = pos_in_3d[0], pos_in_3d[1], pos_in_3d[2]
 
-        # Apply the mask with max(0, star[x][y] - mask[x][y])
-        result[overlap_start:overlap_end, :] = np.maximum(
-            0, star[overlap_start:overlap_end, :] * mask[cover_start:cover_end, :]
-        )
+        current_intensity = initial_intensity
 
-        # show_model(result)
+        # Check if the planet is in front of the star (pz > 0)
+        if pz >= 0:
+            current_star = star.copy()
 
-        intensity = np.sum(result)  # calculating the sum of intensities from each pixel - Ii
-        data.append(float(initial_intensity - cutout_intensity + intensity))  # adding Ii to the output array
+            tl_x = int(round(center_x_star + px - w_mask / 2)) # x_t
+            tl_y = int(round(center_y_star + py - h_mask / 2)) # y_t
 
-    data.insert(0, initial_intensity)
-    data.append(initial_intensity)
+            star_y_start = max(0, tl_y) # y_S_0
+            star_y_end = min(h_star, tl_y + h_mask) # y_S'
+            star_x_start = max(0, tl_x) # x_S_0
+            star_x_end = min(w_star, tl_x + w_mask) # x_S'
 
-    return light_curve(data)  # [I1, I2, ..., Ii] -> [(Φ1, Δm1), (Φ2, Δm2), ..., (Φi, Δmi)]
+            mask_y_start = max(0, -tl_y) # y_0
+            mask_y_end = h_mask - max(0, (tl_y + h_mask) - h_star) # y'
+            mask_x_start = max(0, -tl_x) # x_0
+            mask_x_end = w_mask - max(0, (tl_x + w_mask) - w_star) # x'
+
+            # Apply mask only if there is an overlap
+            if star_y_end > star_y_start and star_x_end > star_x_start:
+                star_slice = current_star[star_y_start:star_y_end, star_x_start:star_x_end]
+                mask_slice = mask[mask_y_start:mask_y_end, mask_x_start:mask_x_end]
+
+                if star_slice.shape == mask_slice.shape:
+                    star_slice *= mask_slice
+
+            current_intensity = np.sum(current_star)
+
+        data_points.append((t, current_intensity)) # I(t)
+
+    # Add out-of-transit points for a full light curve
+    full_data = [(time_points[0] - period / steps, initial_intensity)] + data_points + [
+        (time_points[-1] + period / steps, initial_intensity)] # I(t)
+
+    return light_curve(full_data) # Δm(t)
 
 def correct(array: np.array) -> np.array:
     """
+    See formula 2.2.29.
     Corrects the given array to the range [0, 1]
 
     :param np.array array: the array to normalize
@@ -330,40 +365,100 @@ def show_model(model: np.ndarray) -> None:
     plt.colorbar()
     plt.show()
 
-def transit_animation(star: np.array, mask: np.array) -> list:
+def transit_animation(star: np.array, mask: np.array, period: float, eccentricity: float, sma: float, inclination: float, longitude_of_ascending_node: float, argument_of_periapsis: float,
+            steps: int = 500) -> list:
     """
-        Models the transit by masking the star array with the array of the exoplanet with rings
+    See formulas 2.1.13 - 2.1.16 and 2.2.30 - 2.2.53
+    Models the transit animation based on orbital mechanics.
 
-        :param np.array star: the array of the star covered
-        :param np.array mask: the array of the covering exoplanet with its rings
-        :return: the list of data used for drawing a lightcurve
+    :param star: The 2D array of the star.
+    :param mask: The 2D transmission mask of the exoplanet with rings.
+    :param period: P
+    :param eccentricity: e_p
+    :param sma: α_p
+    :param inclination: i
+    :param longitude_of_ascending_node: Ω
+    :param argument_of_periapsis: ω
+    :param steps: s
+    :return: Δm(t)
     """
-
-    m, n = star.shape
-    n_cover = mask.shape[0]
-
     frames = []
 
-    if mask.shape[1] != n:
-        raise ValueError(f"Mask array must have {n} columns to match the base array.")
+    # Define rotation matrices for the planet's orbit projection
+    standard_inclination_rad = np.deg2rad(90.0 - inclination)
+    azimuthal_tilt_rad = np.deg2rad(longitude_of_ascending_node)
+    arg_peri_rad = np.deg2rad(argument_of_periapsis)
 
-    for start_row in range(m - 1, -n_cover, -1):
-        result = star.copy()
+    R_omega = np.array([
+        [np.cos(arg_peri_rad), -np.sin(arg_peri_rad), 0],
+        [np.sin(arg_peri_rad), np.cos(arg_peri_rad), 0],
+        [0, 0, 1]
+    ])
+    R_i = np.array([
+        [1, 0, 0],
+        [0, np.cos(standard_inclination_rad), np.sin(standard_inclination_rad)],
+        [0, -np.sin(standard_inclination_rad), np.cos(standard_inclination_rad)]
+    ])
+    R_Omega = np.array([
+        [np.cos(azimuthal_tilt_rad), 0, np.sin(azimuthal_tilt_rad)],
+        [0, 1, 0],
+        [-np.sin(azimuthal_tilt_rad), 0, np.cos(azimuthal_tilt_rad)]
+    ])
+    R_orbit = R_Omega @ R_i @ R_omega
 
-        overlap_start = max(start_row, 0)
-        overlap_end = min(start_row + n_cover, m)
+    h_star, w_star = star.shape
+    h_mask, w_mask = mask.shape
+    center_x_star, center_y_star = w_star // 2, h_star // 2
 
-        cover_start = overlap_start - start_row
-        cover_end = cover_start + (overlap_end - overlap_start)
+    # Iterate through time to generate frames
+    time_points = np.linspace(-period / 2, period / 2, steps)
+    for t in time_points:
+        # Calculate orbital position
+        M_A = mean_anomaly(t, period)
+        E = eccentric_anomaly(M_A, eccentricity)
+        nu = true_anomaly(E, eccentricity)
+        r = radius_vector(sma, eccentricity, nu)
 
-        # Apply the mask with max(0, star[x][y] - mask[x][y])
-        result[overlap_start:overlap_end, :] = np.maximum(
-            0, star[overlap_start:overlap_end, :] * mask[cover_start:cover_end, :]
-        )
+        # Position vector in the orbital plane
+        pos_in_orbit = np.array([r * np.cos(np.deg2rad(nu)), r * np.sin(np.deg2rad(nu)), 0])
 
-        frames.append(_array_to_qimage(result))  # adding a new frame
+        # Project position onto the observer's 3D frame
+        pos_in_3d = R_orbit @ pos_in_orbit
+        px, py, pz = pos_in_3d[0], pos_in_3d[1], pos_in_3d[2]
+
+        current_frame = star.copy()
+
+        # Check if the planet is in front of the star (pz > 0)
+        if pz >= 0:
+            # Define top-left corner for placing the mask
+            tl_x = int(round(center_x_star + px - w_mask / 2))
+            tl_y = int(round(center_y_star + py - h_mask / 2))
+
+            # Determine the overlapping region to avoid index errors
+            star_y_start = max(0, tl_y)
+            star_y_end = min(h_star, tl_y + h_mask)
+            star_x_start = max(0, tl_x)
+            star_x_end = min(w_star, tl_x + w_mask)
+
+            mask_y_start = max(0, -tl_y)
+            mask_y_end = h_mask - max(0, (tl_y + h_mask) - h_star)
+            mask_x_start = max(0, -tl_x)
+            mask_x_end = w_mask - max(0, (tl_x + w_mask) - w_star)
+
+            # Apply mask only if there is a valid overlap
+            if star_y_end > star_y_start and star_x_end > star_x_start:
+                star_slice = current_frame[star_y_start:star_y_end, star_x_start:star_x_end]
+                mask_slice = mask[mask_y_start:mask_y_end, mask_x_start:mask_x_end]
+
+                # Ensure shapes match for multiplication
+                if star_slice.shape == mask_slice.shape:
+                    star_slice *= mask_slice
+
+        # If planet is behind the star (pz < 0), current_frame remains the unmodified star
+        frames.append(_array_to_qimage(current_frame))
 
     return frames
+
 
 def _array_to_qimage(array: np.array) -> QImage:
     """
