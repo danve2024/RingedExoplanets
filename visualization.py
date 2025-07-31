@@ -13,7 +13,7 @@ import numpy as np
 from measure import Measure
 from units import *
 from formulas import *
-from space import Exoplanet, Rings, Star
+from space import Exoplanet, Rings, Orbit, Star
 from models import transit_animation
 from observations import Observations
 
@@ -77,7 +77,7 @@ class Selection(QWidget):
 
         self.user_values['other']['star_radius'] = 700_000 * km
         self.user_values['other']['star_temperature'] = 5500 * K
-        self.user_values['other']['log_g'] = 3
+        self.user_values['other']['star_log_g'] = 3
         self.user_values['other']['wavelength'] = 3437 * angstrom
         self.user_values['other']['band'] = 'V (quadratic)'
         self.user_values['other']['limb_darkening'] = 'quadratic'
@@ -181,10 +181,10 @@ class Selection(QWidget):
                     self.user_values['other']['angular_size'] = int(value.split()[0]) * km
 
                 def set_star_temperature(value):
-                    self.user_values['other']['temperature'] = int(value.split()[0])
+                    self.user_values['other']['star_temperature'] = int(value.split()[0])
 
                 def set_star_log_g(value):
-                    self.user_values['other']['log_g'] = float(value.split()[0])
+                    self.user_values['other']['star_log_g'] = float(value.split()[0])
 
                 def set_wavelength(value):
                     self.user_values['other']['wavelength'] = int(value.split()[0])
@@ -243,7 +243,7 @@ class Selection(QWidget):
             'star_radius': 'km',
             'star_temperature': 'K',
             'star_log(g)': '',
-            'wavelength': 'Å',
+            'wavelength': 'Å'
         }
         return units.get(name, '')
 
@@ -386,10 +386,11 @@ class Model(QWidget):
         self.width_start = self.params['width_start']
         self.width_end = self.params['width_end']
         self.temperature = self.params['star_temperature']
-        self.log_g = self.params['log_g']
+        self.log_g = self.params['star_log_g']
         self.star_radius = self.params['star_radius']
         self.wavelength = self.params['wavelength']
         self.band = self.params['band']
+        self.limb_darkening = self.params['limb_darkening']
         self.defaults = parameters
 
         # Create sliders
@@ -516,6 +517,7 @@ class Model(QWidget):
         self.time_shift = slider
         self.time_shift_label = value_label
 
+    @staticmethod
     def get_unit_label(name: str) -> str:
         """Get the unit label for a given parameter"""
         units = {
@@ -537,6 +539,7 @@ class Model(QWidget):
             'star_temperature': 'K',
             'star_log(g)': '',
             'wavelength': 'Å',
+            'band': 'V'
         }
         return units.get(name, '')
 
@@ -550,10 +553,12 @@ class Model(QWidget):
             params[key] = real_value
             self.slider_labels[key].setText(f"{real_value:.2f}")
 
-        params['temperature'] = self.temperature
-        params['log_g'] = self.log_g
+        params['star_temperature'] = self.temperature
+        params['star_log_g'] = self.log_g
         params['star_radius'] = self.star_radius
         params['wavelength'] = self.wavelength
+        params['band'] = self.band
+        params['limb_darkening'] = self.limb_darkening
 
         self.update_dependent_sliders(params)
 
@@ -600,13 +605,13 @@ class Model(QWidget):
 
         elapsed_time = time.time() - start_time
         self.time_label.setText(f"Time spent: {elapsed_time:.2f} sec")
-        self.eclipse_label.setText(f"Transit period: {transit_period:.2f} sec")
+        self.eclipse_label.setText(f"Transit period: {transit_period/days:.2f} d")
 
     def update_dependent_sliders(self, params: dict) -> None:
         """Update the dependent sliders (ring mass and semi-major axis)"""
         exoplanet_radius = params['exoplanet_radius'].set(km)
-        exoplanet_mass = params['exoplanet_density'].set(gcm3)
-        ring_eccentricity = params['ring_eccentricity']
+        exoplanet_mass = params['exoplanet_mass'].set(gcm3)
+        ring_eccentricity = params['eccentricity']
         ring_density = params['density'].set(gcm3)
         exoplanet_sma = params['exoplanet_sma'].set(au)
         exoplanet_orbit_eccentricity = params['exoplanet_orbit_eccentricity']
@@ -644,7 +649,7 @@ class Model(QWidget):
 
         self.defaults['width'].update(w_min / km, w_max / km)
 
-        m_predicted = maximum_ring_mass(M, radius, sma) # ring mass maximum
+        m_predicted = maximum_ring_mass(exoplanet_mass, exoplanet_radius, sma, ring_eccentricity) # ring mass maximum
 
         if self.ring_mass_end == 'Avoid Binarity':
             m_max = m_predicted
@@ -656,32 +661,38 @@ class Model(QWidget):
         else:
             m_min = float(self.ring_mass_start) * kg
 
-        self.defaults['ring_mass'].update(m_min / kg, m_max / kg)
+        self.defaults['mass'].update(m_min / kg, m_max / kg)
 
     @staticmethod
-    def calculate_data(radius: Measure.Unit, density: Measure.Unit, ring_density: Measure.Unit,
-                       exoplanet_sma: Measure.Unit, sma: Measure.Unit, width: Measure.Unit, ring_mass: Measure.Unit,
-                       eccentricity: Measure.Unit, inclination: Measure.Unit, temperature: int, log_g: int, angular_size: float, wavelength: int) -> tuple:
+    def calculate_data(exoplanet_sma: Union[float, Measure.Unit], exoplanet_orbit_eccentricity: Union[float, Measure.Unit], exoplanet_orbit_inclination: Union[float, Measure.Unit], exoplanet_longitude_of_ascending_node: Union[float, Measure.Unit], exoplanet_argument_of_periapsis: Union[float, Measure.Unit], exoplanet_radius: Union[float, Measure.Unit], exoplanet_mass: Union[float, Measure.Unit], density: Union[float, Measure.Unit], eccentricity: Union[float, Measure.Unit], sma: Union[float, Measure.Unit], width: Union[float, Measure.Unit], mass: Union[float, Measure.Unit], obliquity: Union[float, Measure.Unit], azimuthal_angle: Union[float, Measure.Unit], argument_of_periapsis: Union[float, Measure.Unit], star_radius: int, star_temperature: int, star_log_g: float, wavelength: int, band: str, limb_darkening: str) -> tuple:
         """Calculate the simulation data"""
         # Parameters
-        radius = radius.set(km)
-        density = density.set(gcm3)
-        ring_density = ring_density.set(gcm3)
         exoplanet_sma = exoplanet_sma.set(au)
+        exoplanet_orbit_inclination = exoplanet_orbit_inclination.set(deg)
+        exoplanet_longitude_of_ascending_node = exoplanet_longitude_of_ascending_node.set(deg)
+        exoplanet_argument_of_periapsis = exoplanet_argument_of_periapsis.set(deg)
+        exoplanet_radius = exoplanet_radius.set(km)
+        exoplanet_mass = exoplanet_mass.set(exoplanet_mass)
+        density = density.set(gcm3)
         sma = sma.set(km)
         width = width.set(km)
-        ring_mass = ring_mass.set(kg)
-        inclination = inclination.set(deg)
+        mass = mass.set(kg)
+        obliquity = obliquity.set(deg)
+        azimuthal_angle = azimuthal_angle.set(deg)
+        argument_of_periapsis = argument_of_periapsis.set(deg)
+        star_radius = star_radius * km
+        star_temperature = star_temperature * km
+        wavelength = wavelength * angstrom
 
-        # Create exoplanet and calculate simulation data
-        V = volume(radius)  # exoplanet volume
-        M = V * density  # exoplanet mass
-        rings = Rings(ring_density, sma, width, ring_mass, eccentricity, inclination)  # create rings
-        exoplanet = Exoplanet(rings, radius, density, exoplanet_sma, V, M)  # create exoplanet
+        stellar_mass = star_mass(star_log_g, star_radius)
+
+        rings = Rings(density, eccentricity, sma, width, obliquity, azimuthal_angle, argument_of_periapsis, mass)  # create rings
+        orbit = Orbit(exoplanet_sma, exoplanet_orbit_eccentricity, exoplanet_orbit_inclination, exoplanet_longitude_of_ascending_node, exoplanet_argument_of_periapsis, stellar_mass) # create exoplanet orbit
+        exoplanet = Exoplanet(rings, orbit, exoplanet_radius, exoplanet_mass)  # create exoplanet
 
         # Star initialization
-        apsis = exoplanet.rings.angular_sma * (1 + exoplanet.rings.eccentricity) # apsis: Q = a(1+e)
-        star = Star(2 * apsis, angular_size, temperature, log_g, wavelength)
+        apsis = exoplanet.rings.px_sma * (1 + exoplanet.rings.eccentricity) # apsis
+        star = Star(2 * apsis, star_radius, star_temperature, star_log_g, wavelength, band, limb_darkening_model=limb_darkening)
 
         data = star.transit(exoplanet)
         transit_period = data[0]
@@ -715,7 +726,7 @@ class AnimationWindow(QDialog):
         self.layout.addWidget(self.label)
         self.setLayout(self.layout)
 
-        self.frames = transit_animation(star.model, exoplanet.model)  # Generate frames
+        self.frames = star.transit_frames(exoplanet) # Generate frames
         self.current_frame_index = 0
 
         self.timer = QTimer()

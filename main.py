@@ -11,14 +11,14 @@ See the documentation of used parameters and their abbreviations used in comment
 
 defaults = {
     'exoplanet_sma': Measure(0.1, 50, au, label='A'),
-    'exoplanet_orbit_eccentricity': Measure(0, 0.8, label='e_p'),
+    'exoplanet_orbit_eccentricity': Measure(0, 0.4, label='e_p'),
     'exoplanet_orbit_inclination': Measure(-90, 90, deg, label='i'),
     'exoplanet_longitude_of_ascending_node': Measure(0, 360, deg, label='Ω'),
     'exoplanet_argument_of_periapsis': Measure(0, 360, deg, label='ω'),
     'exoplanet_radius': Measure(2_000, 560_000, km, label='R'),
     'exoplanet_mass': Measure(1e23, 7e27, kg, label='D'),
     'density': Measure(0.01, 0.03, gcm3, label='ρ'), # Dependent slider
-    'eccentricity': Measure(0, 0.8, label='e'),
+    'eccentricity': Measure(0, 0.4, label='e'),
     'sma': Measure(5e5, 5e6, km, label='a'),  # Dependent slider
     'width': Measure(1e4, 1e6, km, label='w'), # Dependent slider
     'mass': Measure(0.1, 10, kg, label='m'), # Dependent slider

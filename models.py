@@ -51,7 +51,7 @@ def elliptical_ring(
         argument_of_periapsis: float,
         fill: float) -> np.array:
     """
-    See equations 2.2.3 - 2.2.23.
+    See equations 2.2.3 - 2.2.26.
     Draws an elliptical ring using standard orbital parameters for orientation.
 
     :param size: χ_a
@@ -91,6 +91,10 @@ def elliptical_ring(
 
     R = R_azimuthal_angle @ R_obliquity @ R_arg_peri # R
 
+    ring_normal_vector = R[:, 2] # vector RNA
+    los_vector = np.array([0, 0, 1]) # vector LOS
+    cos_angle = np.dot(ring_normal_vector, los_vector) # cosη
+
     L = np.linspace(-size / 2, size / 2, size) # L
     X, Y = np.meshgrid(L, L) # X, Y
 
@@ -115,13 +119,13 @@ def elliptical_ring(
     ring_mask = (radius_proj >= radius_inner_theory) & (radius_proj <= radius_outer_theory)
 
     transmission_map = np.ones((size, size), dtype=float)
-    transmission_map[ring_mask] = fill
+    transmission_map[ring_mask] = fill * cos_angle
 
     return transmission_map
 
 def quadratic_star_model(shape: list[int], coefficients: list[float]) -> np.array:
     """
-    See formulas 2.2.24 - 2.2.27.
+    See formulas 2.2.27 - 2.2.30.
     Creates a star model using the quadratic limb darkening approximation
     :param shape: n, k
     :param coefficients: γ_1, γ_2
@@ -164,7 +168,7 @@ def quadratic_star_model(shape: list[int], coefficients: list[float]) -> np.arra
 
 def square_root_star_model(shape: list[int], coefficients: list[float]) -> np.array:
     """
-    See formulas 2.2.24 - 2.2.26, 2.2.28.
+    See formulas 2.2.27 - 2.2.29, 2.2.31.
     Creates a star model using the square-root limb darkening approximation
     :param shape: n, k
     :param coefficients: γ_3, γ_4
@@ -239,7 +243,7 @@ def crop(array: np.array, rows: int, shape: tuple[int] = None, end: bool = False
 def transit(star: np.array, mask: np.array, period: float, eccentricity: float, sma: float, inclination: float, longitude_of_ascending_node: float, argument_of_periapsis: float,
             steps: int = 500) -> list:
     """
-    See formulas 2.1.13 - 2.1.16 and 2.2.30 - 2.2.53
+    See formulas 2.1.13 - 2.1.16 and 2.2.33 - 2.2.56
     Models the transit light curve based on orbital mechanics.
 
     :param star: The 2D array of the star.
@@ -368,7 +372,7 @@ def show_model(model: np.ndarray) -> None:
 def transit_animation(star: np.array, mask: np.array, period: float, eccentricity: float, sma: float, inclination: float, longitude_of_ascending_node: float, argument_of_periapsis: float,
             steps: int = 500) -> list:
     """
-    See formulas 2.1.13 - 2.1.16 and 2.2.30 - 2.2.53
+    See formulas 2.1.13 - 2.1.16 and 2.2.33 - 2.2.56
     Models the transit animation based on orbital mechanics.
 
     :param star: The 2D array of the star.

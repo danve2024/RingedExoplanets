@@ -6,9 +6,9 @@ from scipy.signal import ellip
 from units import *
 from formulas import *
 from measure import Measure
-from math import pi, exp, cos, sqrt
+from math import exp
 from typing import Union
-from models import disk, elliptical_ring, correct, transit, quadratic_star_model, square_root_star_model #, gaussian
+from models import disk, elliptical_ring, transit, quadratic_star_model, square_root_star_model, transit_animation
 import numpy as np
 
 # Functions that require other Solar System objects
@@ -43,7 +43,7 @@ class Rings:
     """
     A class for the rings model.
     """
-    def __init__(self, density: Measure.Unit, eccentricity: Measure.Unit, sma: Measure.Unit, width: Measure.Unit, obliquity: Measure.Unit, azimuthal_angle: Measure.Unit, argument_of_periapsis: Measure.Unit, mass: Measure.Unit, specific_absorption_coefficient):
+    def __init__(self, density: Measure.Unit, eccentricity: Measure.Unit, sma: Measure.Unit, width: Measure.Unit, obliquity: Measure.Unit, azimuthal_angle: Measure.Unit, argument_of_periapsis: Measure.Unit, mass: Measure.Unit, specific_absorption_coefficient=2.3e-3 * (m**2/g)):
         # Ring parameters
         self.density = density # density (ρ)
         self.eccentricity = eccentricity # eccentricity (e)
@@ -124,7 +124,7 @@ class Exoplanet:
         self.px_radius = to_pixels(self.radius, self.pixel) # radius in pixels (χ_R)
 
         # Create exoplanet model with its rings
-        self.rings.init(to_pixels(2 * self.radius), pixel)
+        self.rings.init(int(to_pixels(2 * self.radius)), pixel)
         self.apoapsis = self.rings.sma * (1 + self.rings.eccentricity) # apoapsis (r_a), see formula 2.3.4
         self.crop_factor = to_pixels(max(2 * self.radius, 2 * self.apoapsis)) # cropping factor (CF), see formula 2.3.5
         self.disk = disk(to_pixels(self.radius), self.crop_factor) # disk
@@ -149,22 +149,19 @@ class Exoplanet:
         return self.info() + '\n' + str(self.orbit) + '\n' + str(self.rings)
 
 class Star:
-    def __init__(self, cropping_factor: Union[float, Measure.Unit], radius: Union[float, Measure.Unit], temperature: Union[float, Measure.Unit] = 8000, log_g: Union[float, Measure.Unit] = 4, wavelength_or_band: Union[str, float, Measure.Unit] = 4687, pixel=100_000, limb_darkening_model: str = 'square-root') -> None:
+    def __init__(self, cropping_factor: Union[float, Measure.Unit], radius: Union[float, Measure.Unit], temperature: Union[float, Measure.Unit] = 8000, log_g: Union[float, Measure.Unit] = 4, wavelength: Union[float, Measure.Unit] = 4687, band='V', pixel=100_000, limb_darkening_model: str = 'square-root') -> None:
         self.radius = radius # radius (R_S)
         self.temperature = temperature # temperature
         self.log_g = log_g # log(g)
         self.cropping_factor = cropping_factor # width in pixels (should be equal to the asteroid diameter) (CF), see formula 2.3.5
-        self.wavelength_or_band = wavelength_or_band
+        self.wavelength = wavelength
+        self.band = band
         self.limb_darkening_model = limb_darkening_model # limb-darkening model
-        if isinstance(wavelength_or_band, str):
-            self.band = self.wavelength_or_band # observations band
-        else:
-            self.wavelength = self.wavelength_or_band # observation wavelength
 
 
         try:
             if self.limb_darkening_model == 'quadratic':
-                c1, c2 = square_root_limb_darkening[self.temperature][self.log_g][self.band] # square-root limb darkening coefficients (γ_1, γ_2)
+                c1, c2 = quadratic_limb_darkening[self.temperature][self.log_g][self.band] # square-root limb darkening coefficients (γ_1, γ_2)
                 star_model = quadratic_star_model
 
             elif self.limb_darkening_model == 'square-root':
@@ -185,14 +182,48 @@ class Star:
 
 
     def __str__(self):
-        return f"star(CF: {self.cropping_factor}px, R_S: {self.radius}'', T: {self.temperature/K}K, log_g: {self.log_g}, λ(Å)/Band: {self.wavelength_or_band})"
+        return f"star(CF: {self.cropping_factor}px, R_S: {self.radius}'', T: {self.temperature/K}K, log_g: {self.log_g}, λ: {self.wavelength}Å, band: {self.band})"
 
-    def transit(self, exoplanet: Exoplanet):
+    def transit(self, exoplanet: Exoplanet, steps: int=500):
         """
         Calculates the transit time and the lightcurve of the magnitude change of the exoplanet transit.
 
         :param Exoplanet exoplanet: the transiting exoplanet
+        :param steps: number of transit frames
         :return: [P, Δm(t)] - exoplanet period and transit light curve
         """
 
-        return [exoplanet.orbit.period, transit(self.model, self.model, self.intensity)]
+        lightcurve = transit(
+            star=self.model,
+            mask=exoplanet.model,
+            period=exoplanet.orbit.period,
+            eccentricity=exoplanet.orbit.eccentricity,
+            sma=exoplanet.orbit.sma,
+            inclination=exoplanet.orbit.inclination,
+            longitude_of_ascending_node=exoplanet.orbit.lan,
+            argument_of_periapsis=exoplanet.orbit.argument_of_periapsis,
+            steps=steps
+        )
+
+        return [exoplanet.orbit.period, lightcurve]
+
+    def transit_frames(self, exoplanet: Exoplanet, steps: int = 500):
+        """
+        Returns the transit frames for an animation window.
+
+        :param Exoplanet exoplanet: the transiting exoplanet
+        :param steps: number of transit frames
+        :return: [P, Δm(t)] - exoplanet period and transit light curve
+        """
+
+        return transit_animation(
+            star=self.model,
+            mask=exoplanet.model,
+            period=exoplanet.orbit.period,
+            eccentricity=exoplanet.orbit.eccentricity,
+            sma=exoplanet.orbit.sma,
+            inclination=exoplanet.orbit.inclination,
+            longitude_of_ascending_node=exoplanet.orbit.lan,
+            argument_of_periapsis=exoplanet.orbit.argument_of_periapsis,
+            steps=steps
+        )
