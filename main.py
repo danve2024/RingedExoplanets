@@ -15,7 +15,7 @@ defaults = {
     'exoplanet_orbit_inclination': Measure(-90, 90, deg, label='i'),
     'exoplanet_longitude_of_ascending_node': Measure(0, 360, deg, label='Ω'),
     'exoplanet_argument_of_periapsis': Measure(0, 360, deg, label='ω'),
-    'exoplanet_radius': Measure(2_000, 560_000, km, label='R'),
+    'exoplanet_radius': Measure(2_000, 350_000, km, label='R'),
     'exoplanet_mass': Measure(1e23, 7e27, kg, label='D'),
     'density': Measure(0.01, 0.03, gcm3, label='ρ'), # Dependent slider
     'eccentricity': Measure(0, 0.4, label='e'),
@@ -25,12 +25,14 @@ defaults = {
     'obliquity': Measure(-90, 90, deg, label='θ'),
     'azimuthal_angle': Measure(0, 360, deg, label='φ'),
     'argument_of_periapsis': Measure(0, 360, deg, label='ψ'),
+    'specific_absorption_coefficient': 2.3e-3 * (m**2/g),
     'star_radius': 700_000 * km,
     'star_temperature': 5500 * K,
     'star_log(g)': 3,
     'wavelength': 3437 * angstrom,
     'band': 'V (quadratic)',
-    'limb_darkening': 'quadratic'
+    'limb_darkening': 'quadratic',
+    'pixel_size': 1000 * km
 }
 
 # Graphics

@@ -1,6 +1,8 @@
 import math
 
-from PyQt6.QtGui import QImage
+from PyQt6.QtCore import Qt, QTimer
+from PyQt6.QtGui import QImage, QPixmap
+from PyQt6.QtWidgets import QVBoxLayout, QDialog, QLabel
 import matplotlib.pyplot as plt
 import numpy as np
 
@@ -17,27 +19,21 @@ def disk(radius: float, size: float = None) -> np.ndarray:
     """
     See formulas 2.1.1, 2.1.2
     Draws a disk of specified radius.
-    Notion! Here, infinity is represented with number 1.
 
     :param radius: χ_R
     :param size: χ_a
     :return: numpy array with a disk of specified radius with values of τ(x, y)
     """
-    if size is None:
-        size = 2 * radius + 1 # default sizing
-    size = int(round(size))
-    if size == 0:
-        return np.ones((1, 1))
-    if size % 2 == 0:
-        size -= 1
+
+    size = int(size)
 
     center = (size - 1) / 2.0
 
-    ans = np.ones((size, size), dtype=float)
+    ans = np.zeros((size, size), dtype=float)
     y, x = np.ogrid[:size, :size]
 
     mask = (x - center) ** 2 + (y - center) ** 2 <= radius ** 2
-    ans[mask] = 0
+    ans[mask] = np.inf
     return ans
 
 # must be edited
@@ -64,6 +60,8 @@ def elliptical_ring(
     :param fill: τ
     :return: numpy array with an elliptical ring of specified parameters
     """
+
+
 
     inclination_rad = np.deg2rad(90.0 - obliquity) # υ
     azimuthal_angle_rad = np.deg2rad(azimuthal_angle)
@@ -118,7 +116,7 @@ def elliptical_ring(
 
     ring_mask = (radius_proj >= radius_inner_theory) & (radius_proj <= radius_outer_theory)
 
-    transmission_map = np.ones((size, size), dtype=float)
+    transmission_map = np.zeros((size, size), dtype=float)
     transmission_map[ring_mask] = fill * cos_angle
 
     return transmission_map
@@ -160,11 +158,12 @@ def quadratic_star_model(shape: list[int], coefficients: list[float]) -> np.arra
             if mu < 0:
                 mu = 0
             result[x, y] = 1 - u1 * (1 - mu) - u2 * (1 - mu) ** 2
+            if (x - center_x) ** 2 + (y - center_y) ** 2 >= n ** 2 / 4:
+                result[x, y] = 0
             if result[x, y] < 0:
                 result[x, y] = 0
 
     return np.rot90(result)
-
 
 def square_root_star_model(shape: list[int], coefficients: list[float]) -> np.array:
     """
@@ -176,6 +175,8 @@ def square_root_star_model(shape: list[int], coefficients: list[float]) -> np.ar
     """
 
     n, k = shape
+    k = n
+
     u3, u4 = coefficients
 
     if n == 0:
@@ -325,7 +326,7 @@ def transit(star: np.array, mask: np.array, period: float, eccentricity: float, 
                 mask_slice = mask[mask_y_start:mask_y_end, mask_x_start:mask_x_end]
 
                 if star_slice.shape == mask_slice.shape:
-                    star_slice *= mask_slice
+                    star_slice *= np.exp(-mask_slice)
 
             current_intensity = np.sum(current_star)
 
@@ -417,16 +418,13 @@ def transit_animation(star: np.array, mask: np.array, period: float, eccentricit
     # Iterate through time to generate frames
     time_points = np.linspace(-period / 2, period / 2, steps)
     for t in time_points:
-        # Calculate orbital position
         M_A = mean_anomaly(t, period)
         E = eccentric_anomaly(M_A, eccentricity)
         nu = true_anomaly(E, eccentricity)
         r = radius_vector(sma, eccentricity, nu)
 
-        # Position vector in the orbital plane
         pos_in_orbit = np.array([r * np.cos(np.deg2rad(nu)), r * np.sin(np.deg2rad(nu)), 0])
 
-        # Project position onto the observer's 3D frame
         pos_in_3d = R_orbit @ pos_in_orbit
         px, py, pz = pos_in_3d[0], pos_in_3d[1], pos_in_3d[2]
 
@@ -434,11 +432,9 @@ def transit_animation(star: np.array, mask: np.array, period: float, eccentricit
 
         # Check if the planet is in front of the star (pz > 0)
         if pz >= 0:
-            # Define top-left corner for placing the mask
             tl_x = int(round(center_x_star + px - w_mask / 2))
             tl_y = int(round(center_y_star + py - h_mask / 2))
 
-            # Determine the overlapping region to avoid index errors
             star_y_start = max(0, tl_y)
             star_y_end = min(h_star, tl_y + h_mask)
             star_x_start = max(0, tl_x)
@@ -449,16 +445,13 @@ def transit_animation(star: np.array, mask: np.array, period: float, eccentricit
             mask_x_start = max(0, -tl_x)
             mask_x_end = w_mask - max(0, (tl_x + w_mask) - w_star)
 
-            # Apply mask only if there is a valid overlap
             if star_y_end > star_y_start and star_x_end > star_x_start:
                 star_slice = current_frame[star_y_start:star_y_end, star_x_start:star_x_end]
                 mask_slice = mask[mask_y_start:mask_y_end, mask_x_start:mask_x_end]
 
-                # Ensure shapes match for multiplication
                 if star_slice.shape == mask_slice.shape:
-                    star_slice *= mask_slice
+                    star_slice *= np.exp(-mask_slice)
 
-        # If planet is behind the star (pz < 0), current_frame remains the unmodified star
         frames.append(_array_to_qimage(current_frame))
 
     return frames
@@ -479,7 +472,87 @@ def _array_to_qimage(array: np.array) -> QImage:
     # Create QImage with a copy to avoid segmentation fault
     return QImage(img_array.data, width, height, width, QImage.Format.Format_Grayscale8).copy()
 
-
 if __name__ == '__main__':
-    show_model(disk(20, 200) + elliptical_ring(200, 40, 0.4, 1, 90, 50, 40, 0.4))
+    # Example usage of the new functions
+    star_example = quadratic_star_model([100, 100], [0.2, 0.2])
+
+    # Ring mask is a transmission map (1 = transparent, <1 = opaque)
+    ring_mask = elliptical_ring(
+        size=101,
+        a=30,
+        e=0.6,
+        w=10,
+        obliquity=70,
+        azimuthal_angle=20,
+        argument_of_periapsis=45,
+        fill=1.5  # optical depth
+    )
+
+    # Planet disk is fully opaque (transmission = 0)
+    planet_disk = disk(radius=10, size=101)
+
+    # Combine them
+    combined_mask = ring_mask + planet_disk
+
+    show_model(star_example)
+    show_model(combined_mask)
+
+    # Example transit calculation
+    # NOTE: a_p is in pixel units for this simulation
+    lightcurve_data = transit(star_example, combined_mask, 1.0,  0.1, 80, 5, 30, 90)
+
+    # Plotting the light curve
+    times = [item[0] for item in lightcurve_data]
+    magnitudes = [item[1] for item in lightcurve_data]
+
+    plt.figure()
+    plt.plot(times, magnitudes)
+    plt.gca().invert_yaxis()
+    plt.title("Transit Light Curve")
+    plt.xlabel("Time")
+    plt.ylabel("Magnitude Change (Δm)")
+    plt.grid(True)
+    plt.show()
+
+    frames = transit_animation(star_example, combined_mask, 1.0, 0.1, 80, 40, 30, 90)
+
+
+    class AnimationWindow(QDialog):
+        """transit animation window (opened using the "Show transit animation" window)"""
+
+        def __init__(self, parent=None):
+            super().__init__(parent)
+            self.setWindowTitle("Ringed Exoplanet Transit Simulation")
+            self.setModal(True)
+            self.resize(600, 600)
+
+            self.layout = QVBoxLayout()
+            self.label = QLabel()
+            self.label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.layout.addWidget(self.label)
+            self.setLayout(self.layout)
+
+            self.frames = frames  # Generate frames
+            self.current_frame_index = 0
+
+            self.timer = QTimer()
+            self.timer.timeout.connect(self.update_frame)
+            self.timer.start(33)  # ~30 FPS
+
+        def update_frame(self):
+            """Update the animation frame safely."""
+            if not self.frames:
+                return  # Avoid update if frames are missing
+
+            frame = self.frames[self.current_frame_index]
+            if frame.isNull():
+                return  # Skip invalid frames
+
+            pixmap = QPixmap.fromImage(frame)
+            self.label.setPixmap(pixmap)
+            self.current_frame_index = (self.current_frame_index + 1) % len(self.frames)
+
+
+    app = AnimationWindow()
+    app.exec()
 

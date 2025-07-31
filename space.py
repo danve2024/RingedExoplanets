@@ -1,8 +1,6 @@
 import os.path
 import json
 
-from scipy.signal import ellip
-
 from units import *
 from formulas import *
 from measure import Measure
@@ -18,17 +16,23 @@ See the documentation of used parameters and their abbreviations used in comment
 """
 
 def convert_keys_to_int(d):
-    if isinstance(d, dict):
-        return {int(k) if k.lstrip('-').isdigit() else k: convert_keys_to_int(v) for k, v in d.items()}
-    elif isinstance(d, list):
-        return [convert_keys_to_int(i) for i in d]
-    return d
+    ans = {}
+    for i in d:
+        ans[int(i)] = {}
+        for j in d[i]:
+            ans[int(i)][float(j)] = {}
+            for k in d[i][j]:
+                if list(d[i][j].keys())[0].isalpha():
+                    ans[int(i)][float(j)][k] = d[i][j][k]
+                else:
+                    ans[int(i)][float(j)][int(k)] = d[i][j][k]
+    return ans
 
 loaded_data = {}
 
 for limb_darkening in ['square-root.json', 'quadratic.json']:
     with open(os.path.join('limb_darkening', limb_darkening), 'r') as f:
-        loaded_data[limb_darkening] = json.load(f)
+        loaded_data[limb_darkening] = convert_keys_to_int(json.load(f))
 
 # Parameters for a square-root limb darkening star model (Diaz-Cordoves, J., & Gimenez, A. (1992). A new nonlinear approximation to the limb-darkening of hot stars.)
 # T -> log(g) -> λ
@@ -65,14 +69,14 @@ class Rings:
         self.px_width = None # width in pixels (χ_w)
         self.model = None  # model of the ring
 
-    def init(self, size: Union[float, Measure.Unit], pixel=100_000) -> None:
+    def init(self, size: int, pixel=100_000) -> None:
         """
         Initializes the ring numpy mask array model using models.py/elliptical_ring
 
         :param size: χ_a
         :param pixel: px
         """
-        self.size = size # matrix size
+        self.size = int(size) # matrix size
         self.px_sma = to_pixels(self.sma, pixel)
         self.px_width = to_pixels(self.width, pixel)
         self.model = elliptical_ring(self.size, self.px_sma, self.eccentricity, self.px_width, self.obliquity, self.azimuthal_angle, self.argument_of_periapsis, self.absorption_coefficient)
@@ -83,10 +87,10 @@ class Rings:
 
         :param size: matrix size (used for matrices concatenation)
         """
-        self.model = elliptical_ring(size, self.px_sma, self.eccentricity, self.px_width, self.obliquity, self.azimuthal_angle, self.argument_of_periapsis, self.absorption_coefficient)
+        self.model = elliptical_ring(int(size), self.px_sma, self.eccentricity, self.px_width, self.obliquity, self.azimuthal_angle, self.argument_of_periapsis, self.absorption_coefficient)
 
     def __str__(self) -> str:
-        return f'rings(d:{self.density(gcm3)}g/cm3, e:{self.eccentricity}, a:{self.sma(km)}km, w:{self.width(km)}km, θ:{self.obliquity(deg)}°, φ:{self.azimuthal_angle(deg)}°, ψ:{self.argument_of_periapsis(deg)}°, m:{self.mass(kg)}kg, τ_μ:{self.specific_absorption_coefficient}, τ:{self.absorption_coefficient}, α:{self.px_sma}px, χ_w:{self.px_width}px)'
+        return f'rings(d:{self.density(gcm3)}g/cm³, e:{self.eccentricity}, a:{self.sma(km)}km, w:{self.width(km)}km, θ:{self.obliquity(deg)}°, φ:{self.azimuthal_angle(deg)}°, ψ:{self.argument_of_periapsis(deg)}°, m:{self.mass(kg)}kg, τ_μ:{self.specific_absorption_coefficient}m²/g, τ:{self.absorption_coefficient}, α:{self.px_sma}px, χ_w:{self.px_width}px)'
 
 class Orbit:
     """
@@ -105,7 +109,7 @@ class Orbit:
 
 
     def __str__(self):
-        return f'orbit(a:{self.sma(km)}, e:{self.eccentricity}, i:{self.inclination(deg)}°, Ω:{self.lan(deg)}°, ω:{self.argument_of_periapsis(deg)}°, α_p:{self.px_sma}px)'
+        return f'orbit(a:{self.sma(au)}au, e:{self.eccentricity}, i:{self.inclination(deg)}°, Ω:{self.lan(deg)}°, ω:{self.argument_of_periapsis(deg)}°, α_p:{self.px_sma}px)'
 
 class Exoplanet:
     def __init__(self, rings: Rings, orbit: Orbit, radius: Measure.Unit, mass: Measure.Unit, pixel=100_000):
@@ -119,14 +123,20 @@ class Exoplanet:
         self.mass = mass # mass (M)
         self.volume = volume(self.radius) # volume (V)
         self.density = self.mass / self.volume # density (D), see formula 2.3.3
+        print(self.density)
         self.pixel = pixel # pixel size (px)
 
         self.px_radius = to_pixels(self.radius, self.pixel) # radius in pixels (χ_R)
 
+        # Parameters for limiting the sliders
+        self.min_roche_sma = max(roche_sma_min(self.radius, self.density, self.rings.eccentricity, self.rings.density), self.radius / (1 + self.rings.eccentricity)) # a_Roche_min
+        self.max_roche_sma = roche_sma_max(self.radius, self.density, self.rings.eccentricity, self.rings.density) # a_Roche_max
+        self.maximum_ring_mass = maximum_ring_mass(self.mass, self.radius, self.rings.sma, self.rings.eccentricity) # m_max
+
         # Create exoplanet model with its rings
         self.rings.init(int(to_pixels(2 * self.radius)), pixel)
         self.apoapsis = self.rings.sma * (1 + self.rings.eccentricity) # apoapsis (r_a), see formula 2.3.4
-        self.crop_factor = to_pixels(max(2 * self.radius, 2 * self.apoapsis)) # cropping factor (CF), see formula 2.3.5
+        self.crop_factor = to_pixels(max(2 * self.radius, 2 * self.apoapsis), pixel) # cropping factor (CF), see formula 2.3.5
         self.disk = disk(to_pixels(self.radius), self.crop_factor) # disk
         self.rings.adjust(self.crop_factor)
         self.adjust(self.crop_factor)
@@ -142,8 +152,11 @@ class Exoplanet:
         self.rings.adjust(size)
         self.model = self.disk + self.rings.model
 
+    def hill_sma(self, stellar_mass):
+        return hill_sma(self.orbit.sma, self.orbit.eccentricity, self.rings.eccentricity, stellar_mass, self.mass)
+
     def info(self):
-        return f'R:{self.radius(km)}km, M:{self.mass(kg)}kg, V:{self.volume(m3)}m³, D:{self.density/gcm3}g/cm³, r_a:{self.apoapsis/km}km, χ_R:{self.px_radius}px, CF:{self.crop_factor}px'
+        return f'exoplanet(R:{self.radius(km)}km, M:{self.mass(kg)}kg, V:{self.volume(m3)}m³, D:{self.density/gcm3}g/cm³, r_a:{self.apoapsis/km}km, χ_R:{self.px_radius}px, CF:{self.crop_factor}px)'
 
     def __str__(self):
         return self.info() + '\n' + str(self.orbit) + '\n' + str(self.rings)
@@ -153,6 +166,7 @@ class Star:
         self.radius = radius # radius (R_S)
         self.temperature = temperature # temperature
         self.log_g = log_g # log(g)
+        self.mass = star_mass(self.log_g, self.radius)
         self.cropping_factor = cropping_factor # width in pixels (should be equal to the asteroid diameter) (CF), see formula 2.3.5
         self.wavelength = wavelength
         self.band = band
@@ -161,28 +175,28 @@ class Star:
 
         try:
             if self.limb_darkening_model == 'quadratic':
-                c1, c2 = quadratic_limb_darkening[self.temperature][self.log_g][self.band] # square-root limb darkening coefficients (γ_1, γ_2)
+                c1, c2 = quadratic_limb_darkening[self.temperature][self.log_g][self.band] # quadratic limb-darkening coefficients (γ_1, γ_2)
                 star_model = quadratic_star_model
 
             elif self.limb_darkening_model == 'square-root':
-                c1, c2 = square_root_limb_darkening[self.temperature][self.log_g][self.wavelength] # quadratic limb darkening coefficients (γ_3, γ_4)
+                c1, c2 = square_root_limb_darkening[self.temperature][self.log_g][self.wavelength] # square-root limb-darkening coefficients (γ_3, γ_4)
                 star_model = square_root_star_model
 
             else:
                 raise ValueError(f'Wrong limb darkening model selected: ' + self.limb_darkening_model)
 
         except IndexError:
-            raise ValueError(f'Wrong star parameter value selected (temperature [{self.temperature/K}K], log_g [{self.log_g}] or wavelength/band [{self.wavelength_or_band}]).\nTo see available parameter values check /limb_darkening.')
+            raise ValueError(f'Wrong star parameter value selected (temperature [{self.temperature/K}K], log_g [{self.log_g}], wavelength [{self.wavelength}] or band [{self.band}]).\nTo see available parameter values check /limb_darkening.')
 
         self.intensity = np.sum(star_model([round(to_pixels(self.radius*2, pixel)), round(to_pixels(self.radius*2, pixel))], [c1, c2]))
 
         # Creating the model
-        self.model = star_model([round(self.cropping_factor), round(to_pixels(self.radius*2, pixel))],
+        self.model = star_model([round(to_pixels(self.radius*2, pixel)), round(to_pixels(self.radius*2, pixel))],
                                 [c1, c2])
 
 
     def __str__(self):
-        return f"star(CF: {self.cropping_factor}px, R_S: {self.radius}'', T: {self.temperature/K}K, log_g: {self.log_g}, λ: {self.wavelength}Å, band: {self.band})"
+        return f"star(CF: {self.cropping_factor}px, R_S: {self.radius/km}km, T: {self.temperature/K}K, log_g: {self.log_g}, λ: {self.wavelength}Å, band: {self.band})"
 
     def transit(self, exoplanet: Exoplanet, steps: int=500):
         """
