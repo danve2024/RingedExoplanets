@@ -432,7 +432,7 @@ class Model(QWidget):
             self.time_shift_slider()
 
         # Additional parameters
-        data_label = QLabel(f"τ_μ: {self.specific_absorption_coefficient / (m**2/g)}m²/g    R: {self.star_radius / km}km    T: {self.temperature / K}K    log(g): {self.log_g}    λ: {self.wavelength / angstrom}Å    px: {self.pixel_size / km}km")
+        data_label = QLabel(f"τ_μ: {self.specific_absorption_coefficient / (m**2/g)}m²/g    R: {self.star_radius / km}km    T: {self.temperature / K}K    log(g): {self.log_g}    λ: {self.wavelength / angstrom}Å    band: {self.band}    px: {self.pixel_size / km}km")
         self.layout.addWidget(data_label, alignment=Qt.AlignmentFlag.AlignLeft)
 
         # Show animation button
