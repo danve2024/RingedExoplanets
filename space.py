@@ -138,7 +138,7 @@ class Exoplanet:
         self.crop_factor = to_pixels(max(2 * self.radius, 2 * self.apoapsis), pixel) # cropping factor (CF), see formula 2.3.5
         self.disk = disk(to_pixels(self.radius), self.crop_factor) # disk
         self.rings.adjust(self.crop_factor)
-        self.adjust(self.crop_factor)
+        self.adjust(self.crop_factor + self.rings.px_width * (1 + self.rings.eccentricity))
         self.model = self.disk + self.rings.model
 
     def adjust(self, size: Union[float, Measure.Unit]) -> None:
