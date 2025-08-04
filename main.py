@@ -10,7 +10,7 @@ See the documentation of used parameters and their abbreviations used in comment
 """
 
 defaults = {
-    'exoplanet_sma': Measure(0.1, 50, au, label='A'),
+    'exoplanet_sma': Measure(0.1, 20, au, label='A'),
     'exoplanet_orbit_eccentricity': Measure(0, 0.4, label='e_p'),
     'exoplanet_orbit_inclination': Measure(-90, 90, deg, label='i'),
     'exoplanet_longitude_of_ascending_node': Measure(0, 360, deg, label='Ω'),
@@ -30,18 +30,27 @@ defaults = {
     'star_temperature': 5500 * K,
     'star_log(g)': 3,
     'wavelength': 3437 * angstrom,
-    'band': 'V (quadratic)',
+    'band': 'u (quadratic)',
     'limb_darkening': 'quadratic',
-    'pixel_size': 1000 * km
+    'pixel_size': 10000 * km
 }
 
-# Graphics
-selector = Selection(defaults)
-load_file = LoadFile()
-app.exec()
-parameters = selector.user_values
-filename = load_file.filename
+if len(sys.argv) > 1:
+    if sys.argv[1] == 'model':
+        print('Parameter selection step is skipped.')
+        selector = Selection(defaults)
+        selector.click()
+        window = Model(selector.user_values, None)
+        window.show()
+        sys.exit(app.exec())
+else:
+    # Graphics
+    selector = Selection(defaults)
+    load_file = LoadFile()
+    app.exec()
+    parameters = selector.user_values
+    filename = load_file.filename
 
-window = Model(parameters, filename)
-window.show()
-sys.exit(app.exec())
+    window = Model(parameters, filename)
+    window.show()
+    sys.exit(app.exec())

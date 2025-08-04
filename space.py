@@ -76,7 +76,7 @@ class Rings:
         :param size: χ_a
         :param pixel: px
         """
-        self.size = int(size) # matrix size
+        self.size = int(round(size)) # matrix size
         self.px_sma = to_pixels(self.sma, pixel)
         self.px_width = to_pixels(self.width, pixel)
         self.model = elliptical_ring(self.size, self.px_sma, self.eccentricity, self.px_width, self.obliquity, self.azimuthal_angle, self.argument_of_periapsis, self.absorption_coefficient)
@@ -87,7 +87,7 @@ class Rings:
 
         :param size: matrix size (used for matrices concatenation)
         """
-        self.model = elliptical_ring(int(size), self.px_sma, self.eccentricity, self.px_width, self.obliquity, self.azimuthal_angle, self.argument_of_periapsis, self.absorption_coefficient)
+        self.model = elliptical_ring(int(round(size)), self.px_sma, self.eccentricity, self.px_width, self.obliquity, self.azimuthal_angle, self.argument_of_periapsis, self.absorption_coefficient)
 
     def __str__(self) -> str:
         return f'rings(d:{self.density(gcm3)}g/cm³, e:{self.eccentricity}, a:{self.sma(km)}km, w:{self.width(km)}km, θ:{self.obliquity(deg)}°, φ:{self.azimuthal_angle(deg)}°, ψ:{self.argument_of_periapsis(deg)}°, m:{self.mass(kg)}kg, τ_μ:{self.specific_absorption_coefficient}m²/g, τ:{self.absorption_coefficient}, α:{self.px_sma}px, χ_w:{self.px_width}px)'
@@ -123,7 +123,6 @@ class Exoplanet:
         self.mass = mass # mass (M)
         self.volume = volume(self.radius) # volume (V)
         self.density = self.mass / self.volume # density (D), see formula 2.3.3
-        print(self.density)
         self.pixel = pixel # pixel size (px)
 
         self.px_radius = to_pixels(self.radius, self.pixel) # radius in pixels (χ_R)
@@ -134,7 +133,7 @@ class Exoplanet:
         self.maximum_ring_mass = maximum_ring_mass(self.mass, self.radius, self.rings.sma, self.rings.eccentricity) # m_max
 
         # Create exoplanet model with its rings
-        self.rings.init(int(to_pixels(2 * self.radius)), pixel)
+        self.rings.init(int(round(to_pixels(2 * self.radius))), pixel)
         self.apoapsis = self.rings.sma * (1 + self.rings.eccentricity) # apoapsis (r_a), see formula 2.3.4
         self.crop_factor = to_pixels(max(2 * self.radius, 2 * self.apoapsis), pixel) # cropping factor (CF), see formula 2.3.5
         self.disk = disk(to_pixels(self.radius), self.crop_factor) # disk
@@ -162,12 +161,11 @@ class Exoplanet:
         return self.info() + '\n' + str(self.orbit) + '\n' + str(self.rings)
 
 class Star:
-    def __init__(self, cropping_factor: Union[float, Measure.Unit], radius: Union[float, Measure.Unit], temperature: Union[float, Measure.Unit] = 8000, log_g: Union[float, Measure.Unit] = 4, wavelength: Union[float, Measure.Unit] = 4687, band='V', pixel=100_000, limb_darkening_model: str = 'square-root') -> None:
+    def __init__(self, radius: Union[float, Measure.Unit], temperature: Union[float, Measure.Unit] = 8000, log_g: Union[float, Measure.Unit] = 4, wavelength: Union[float, Measure.Unit] = 4687, band='V', pixel=100_000, limb_darkening_model: str = 'square-root') -> None:
         self.radius = radius # radius (R_S)
         self.temperature = temperature # temperature
         self.log_g = log_g # log(g)
         self.mass = star_mass(self.log_g, self.radius)
-        self.cropping_factor = cropping_factor # width in pixels (should be equal to the asteroid diameter) (CF), see formula 2.3.5
         self.wavelength = wavelength
         self.band = band
         self.limb_darkening_model = limb_darkening_model # limb-darkening model
@@ -175,11 +173,17 @@ class Star:
 
         try:
             if self.limb_darkening_model == 'quadratic':
-                c1, c2 = quadratic_limb_darkening[self.temperature][self.log_g][self.band] # quadratic limb-darkening coefficients (γ_1, γ_2)
+                try:
+                    c1, c2 = quadratic_limb_darkening[self.temperature][self.log_g][self.band] # quadratic limb-darkening coefficients (γ_1, γ_2)
+                except KeyError:
+                    raise KeyError(f'No available darkening coefficients for star with parameters T: {self.temperature/K}K log(g): {self.log_g} band: {self.band}')
                 star_model = quadratic_star_model
 
             elif self.limb_darkening_model == 'square-root':
-                c1, c2 = square_root_limb_darkening[self.temperature][self.log_g][self.wavelength] # square-root limb-darkening coefficients (γ_3, γ_4)
+                try:
+                    c1, c2 = square_root_limb_darkening[self.temperature][self.log_g][self.wavelength] # square-root limb-darkening coefficients (γ_3, γ_4)
+                except KeyError:
+                    raise KeyError(f'No available darkening coefficients for star with parameters T: {self.temperature/K}K log(g): {self.log_g} wavelength: {self.wavelength/angstrom}Å')
                 star_model = square_root_star_model
 
             else:
@@ -191,12 +195,12 @@ class Star:
         self.intensity = np.sum(star_model([round(to_pixels(self.radius*2, pixel)), round(to_pixels(self.radius*2, pixel))], [c1, c2]))
 
         # Creating the model
-        self.model = star_model([round(to_pixels(self.radius*2, pixel)), round(to_pixels(self.radius*2, pixel))],
+        self.model = star_model([to_pixels(self.radius*2, pixel), round(to_pixels(self.radius*2, pixel))],
                                 [c1, c2])
 
 
     def __str__(self):
-        return f"star(CF: {self.cropping_factor}px, R_S: {self.radius/km}km, T: {self.temperature/K}K, log_g: {self.log_g}, λ: {self.wavelength}Å, band: {self.band})"
+        return f"star(R_S: {self.radius/km}km, T: {self.temperature/K}K, log_g: {self.log_g}, λ: {self.wavelength}Å, band: {self.band})"
 
     def transit(self, exoplanet: Exoplanet, steps: int=500):
         """
@@ -212,7 +216,7 @@ class Star:
             mask=exoplanet.model,
             period=exoplanet.orbit.period,
             eccentricity=exoplanet.orbit.eccentricity,
-            sma=exoplanet.orbit.sma,
+            sma=exoplanet.orbit.px_sma,
             inclination=exoplanet.orbit.inclination,
             longitude_of_ascending_node=exoplanet.orbit.lan,
             argument_of_periapsis=exoplanet.orbit.argument_of_periapsis,
@@ -235,7 +239,7 @@ class Star:
             mask=exoplanet.model,
             period=exoplanet.orbit.period,
             eccentricity=exoplanet.orbit.eccentricity,
-            sma=exoplanet.orbit.sma,
+            sma=exoplanet.orbit.px_sma,
             inclination=exoplanet.orbit.inclination,
             longitude_of_ascending_node=exoplanet.orbit.lan,
             argument_of_periapsis=exoplanet.orbit.argument_of_periapsis,

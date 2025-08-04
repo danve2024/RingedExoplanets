@@ -76,9 +76,9 @@ class Selection(QWidget):
         self.user_values['other']['star_temperature'] = 4000 * K
         self.user_values['other']['star_log_g'] = 2.00
         self.user_values['other']['wavelength'] = 3437 * angstrom
-        self.user_values['other']['band'] = 'u (quadratic)'
+        self.user_values['other']['band'] = 'u'
         self.user_values['other']['limb_darkening'] = 'quadratic'
-        self.user_values['other']['pixel_size'] = 1000 * km
+        self.user_values['other']['pixel_size'] = 10000 * km
 
         self.init_ui()
 
@@ -370,8 +370,6 @@ class Model(QWidget):
             self.observations = None
         else:
             self.observations = Observations(observations_file) # Working with the observation data if it is loaded
-
-        self.star = None
         self.exoplanet = None
 
         self.magnitude_shift = None
@@ -408,6 +406,8 @@ class Model(QWidget):
         self.pixel_size = self.params['pixel_size']
         self.defaults = parameters
 
+        self.star = Star(self.star_radius, self.temperature, self.log_g, self.wavelength, self.band, self.pixel_size, self.limb_darkening)
+
         # Create sliders
         for key, measure in self.defaults.items():
             self.create_slider(key, measure)
@@ -421,8 +421,8 @@ class Model(QWidget):
         self.time_label = QLabel("Time spent: 0.0 sec")
         self.layout.addWidget(self.time_label)
 
-        # Transit period label
-        self.eclipse_label = QLabel("Transit period: 0.0 sec")
+        # Transit duration label
+        self.eclipse_label = QLabel("Transit duration: 0.0 sec")
         self.layout.addWidget(self.eclipse_label)
 
         # Sliders for working with the observed data
@@ -432,7 +432,7 @@ class Model(QWidget):
             self.time_shift_slider()
 
         # Additional parameters
-        data_label = QLabel(f"τ_μ: {self.specific_absorption_coefficient}m²/g    R: {self.star_radius}km    T: {self.temperature}K    log(g): {self.log_g}    λ: {self.wavelength}Å    px: {self.pixel_size}km")
+        data_label = QLabel(f"τ_μ: {self.specific_absorption_coefficient / (m**2/g)}m²/g    R: {self.star_radius / km}km    T: {self.temperature / K}K    log(g): {self.log_g}    λ: {self.wavelength / angstrom}Å    px: {self.pixel_size / km}km")
         self.layout.addWidget(data_label, alignment=Qt.AlignmentFlag.AlignLeft)
 
         # Show animation button
@@ -440,7 +440,7 @@ class Model(QWidget):
         self.animation_button.clicked.connect(self.show_animation_window)
         self.layout.addWidget(self.animation_button, alignment=Qt.AlignmentFlag.AlignRight)
 
-        for i in range(3):
+        for _ in range(3):
             self.update_plot()
 
     def create_slider(self, name, measure):
@@ -578,7 +578,7 @@ class Model(QWidget):
         params['limb_darkening'] = self.limb_darkening
         params['pixel_size'] = self.pixel_size
 
-        data, transit_period, self.star, self.exoplanet = self.calculate_data(**params)
+        data, transit_duration, self.exoplanet = self.calculate_data(**params, star=self.star)
 
         self.update_dependent_sliders()
 
@@ -590,25 +590,25 @@ class Model(QWidget):
             self.magnitude_shift_label.setText(str(magnitude_shift))
             self.magnitude_calibrating_label.setText(str(magnitude_calibrating))
 
-            self.observations.shift(transit_period, phase_shift, magnitude_shift + magnitude_calibrating)
+            self.observations.shift(transit_duration, phase_shift, magnitude_shift + magnitude_calibrating)
 
         self.ax.clear()
         self.ax.set_title("Simulation Result")
 
-        # Plotting the observations data with the selected shifts
+        try:
+            lightcurve = data[1][1]
+        except IndexError:
+            lightcurve = [(0,0), (1,0)]
+
         # Plotting the observations data with the selected shifts
         if self.observations is None:
-            if len(data[1]) > 2:
-                x, y = zip(*data[1])
-                self.ax.plot(x, y, label='model')
-            else:
-                self.ax.plot([0, 1], [0, 0], label='model')
+            x = [item[0] for item in lightcurve]
+            y = [item[1] for item in lightcurve]
+            self.ax.plot(x, y, label='model')
         else:
-            if len(data[1]) > 2:
-                x, y = zip(*data[1])
-                self.ax.plot(x, y, label='model')
-            else:
-                self.ax.plot([0, 1], [0, 0], label='model')
+            x = [item[0] for item in data[1]]
+            y = [item[1] for item in data[1]]
+            self.ax.plot(x, y, label='model')
             if len(self.observations.data) > 1:
                 xo, yo = zip(*self.observations.data)
                 self.ax.plot(xo, yo, 'g', label='observations')
@@ -623,7 +623,7 @@ class Model(QWidget):
 
         elapsed_time = time.time() - start_time
         self.time_label.setText(f"Time spent: {elapsed_time:.2f} sec")
-        self.eclipse_label.setText(f"Transit period: {transit_period/days:.2f} d")
+        self.eclipse_label.setText(f"Transit duration: {transit_duration/days:.2f} d")
 
     def update_dependent_sliders(self) -> None:
         """Update the dependent sliders (ring mass and semi-major axis)"""
@@ -667,7 +667,7 @@ class Model(QWidget):
         self.defaults['mass'].update(m_min / kg, m_max / kg)
 
     @staticmethod
-    def calculate_data(exoplanet_sma: Union[float, Measure.Unit], exoplanet_orbit_eccentricity: Union[float, Measure.Unit], exoplanet_orbit_inclination: Union[float, Measure.Unit], exoplanet_longitude_of_ascending_node: Union[float, Measure.Unit], exoplanet_argument_of_periapsis: Union[float, Measure.Unit], exoplanet_radius: Union[float, Measure.Unit], exoplanet_mass: Union[float, Measure.Unit], density: Union[float, Measure.Unit], eccentricity: Union[float, Measure.Unit], sma: Union[float, Measure.Unit], width: Union[float, Measure.Unit], mass: Union[float, Measure.Unit], obliquity: Union[float, Measure.Unit], azimuthal_angle: Union[float, Measure.Unit], argument_of_periapsis: Union[float, Measure.Unit], specific_absorption_coefficient: float,star_radius: int, star_temperature: int, star_log_g: float, wavelength: int, band: str, limb_darkening: str, pixel_size: int) -> tuple:
+    def calculate_data(exoplanet_sma: Union[float, Measure.Unit], exoplanet_orbit_eccentricity: Union[float, Measure.Unit], exoplanet_orbit_inclination: Union[float, Measure.Unit], exoplanet_longitude_of_ascending_node: Union[float, Measure.Unit], exoplanet_argument_of_periapsis: Union[float, Measure.Unit], exoplanet_radius: Union[float, Measure.Unit], exoplanet_mass: Union[float, Measure.Unit], density: Union[float, Measure.Unit], eccentricity: Union[float, Measure.Unit], sma: Union[float, Measure.Unit], width: Union[float, Measure.Unit], mass: Union[float, Measure.Unit], obliquity: Union[float, Measure.Unit], azimuthal_angle: Union[float, Measure.Unit], argument_of_periapsis: Union[float, Measure.Unit], specific_absorption_coefficient: float, star: Star, pixel_size: int, **kwargs) -> tuple:
         """Calculate the simulation data"""
         # Parameters
         exoplanet_sma = exoplanet_sma.set(au)
@@ -684,7 +684,7 @@ class Model(QWidget):
         azimuthal_angle = azimuthal_angle.set(deg)
         argument_of_periapsis = argument_of_periapsis.set(deg)
 
-        stellar_mass = star_mass(star_log_g, star_radius)
+        stellar_mass = star.mass
 
         rings = Rings(density, eccentricity, sma, width, obliquity, azimuthal_angle, argument_of_periapsis, mass, specific_absorption_coefficient)  # create rings
         orbit = Orbit(exoplanet_sma, exoplanet_orbit_eccentricity, exoplanet_orbit_inclination, exoplanet_longitude_of_ascending_node, exoplanet_argument_of_periapsis, stellar_mass, pixel_size) # create exoplanet orbit
@@ -692,15 +692,12 @@ class Model(QWidget):
 
         print(exoplanet)
 
-        # Star initialization
-        apsis = exoplanet.rings.px_sma * (1 + exoplanet.rings.eccentricity) # apsis
-        star = Star(2 * apsis, star_radius, star_temperature, star_log_g, wavelength, band, pixel_size, limb_darkening)
         print(star)
 
         data = star.transit(exoplanet)
-        transit_period = data[0]
+        transit_duration = data[0]
 
-        return data, transit_period, star, exoplanet
+        return data, transit_duration, exoplanet
 
     def show_animation_window(self):
         """Open the animation window with error handling."""

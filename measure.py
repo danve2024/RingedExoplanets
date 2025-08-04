@@ -74,10 +74,24 @@ class Measure:
             return Measure.Unit(super().__sub__(float(other)))
 
         def __mul__(self, other):
-            return Measure.Unit(super().__mul__(float(other)))
+            if isinstance(other, Measure.Unit):
+                ans = super().__mul__(float(other))
+            else:
+                ans = super().__mul__(other)
+            try:
+                return Measure.Unit(ans)
+            except TypeError:
+                return ans
 
         def __truediv__(self, other):
-            return Measure.Unit(super().__truediv__(float(other)))
+            if isinstance(other, Measure.Unit):
+                ans = super().__truediv__(float(other))
+            else:
+                ans = super().__truediv__(other)
+            try:
+                return Measure.Unit(ans)
+            except TypeError:
+                return ans
 
         def __pow__(self, other):
             return Measure.Unit(super().__pow__(float(other)))
