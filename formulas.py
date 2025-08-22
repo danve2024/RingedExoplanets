@@ -1,7 +1,7 @@
 import math
 from typing import Union
 from measure import Measure
-from units import au, yrs
+from units import s, cm
 from scipy.constants import G
 
 # Independent formulas used for model calculation
@@ -122,7 +122,7 @@ def star_mass(star_log_g, star_radius) -> Union[float, Measure.Unit]:
     :param star_radius: R_S
     :return: M_S
     """
-    star_g = 10 ** star_log_g
+    star_g = 10 ** star_log_g * (cm * s**2)
     return (star_g * star_radius ** 2) / G
 
 def orbital_period(sma, mass_sum) -> Union[float, Measure]:
@@ -135,6 +135,10 @@ def orbital_period(sma, mass_sum) -> Union[float, Measure]:
     :return: P
     """
     return 2 * math.pi * math.sqrt(sma ** 3 / (G * mass_sum))
+
+def semimajor_axis(period, log_g, star_radius):
+    g = 10 ** log_g * (cm * s**2)
+    return ((period ** 2 * g * star_radius ** 2) / (4 * math.pi**2)) ** (1/3)
 
 def mean_anomaly(time, period) -> Union[float, Measure.Unit]:
     """
@@ -226,7 +230,7 @@ def light_curve(data: list) -> list:
 
     return ans
 
-def to_pixels(linear_size, pixel = 100_000) -> Union[float, Measure.Unit]:
+def to_pixels(linear_size, pixel = 1_000_000) -> Union[float, Measure.Unit]:
     """
     See equation 2.1.18.
     Converts linear units to pixel units for creating mask matrices.

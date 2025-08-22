@@ -1,0 +1,11 @@
+Orbit Eccentricity          : 0.002 +0.001 / -0.000
+Orbit Inclination, °        : 89.916 +0.068 / -0.136
+Ex. Long. Asc. Node, °      : 90.000 +0.000 / -0.000
+Ex. Arg. of Periapsis, °    : 0.113 +0.063 / -0.081
+Exoplanet Radius, km        : 58677.600 +0.000 / -0.000
+Ring Ecccentricity          : 0.365 +0.027 / -0.061
+Ring Semi-major Axis, km    : 114804.000 +0.000 / -0.000
+Ring Width, km              : 25512.000 +0.000 / -0.000
+Ring Obliquity, °           : 0.077 +0.058 / -0.059
+Ring Azimuthal Angle, °     : 90.099 +0.212 / -0.140
+Ring Arg. of Periapsis, °   : 0.081 +0.128 / -0.064

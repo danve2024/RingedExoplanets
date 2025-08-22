@@ -1,21 +1,24 @@
+import os
 import time
 import sys
 import traceback
 
 from PyQt6.QtWidgets import QHBoxLayout, QSlider, QMessageBox, QFileDialog, QComboBox
-from PyQt6.QtCore import QTimer, Qt
-from PyQt6.QtGui import QPixmap
+from PyQt6.QtCore import QTimer, Qt, QBuffer, QIODevice
+from PyQt6.QtGui import QPixmap, QImage
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 from units import *
 from formulas import *
-from space import Exoplanet, Rings, Orbit, Star
 from observations import Observations
 
 from PyQt6.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QGridLayout,
     QLabel, QLineEdit, QCheckBox, QPushButton, QDialog
 )
+
+from PIL import Image
+from io import BytesIO
 
 """
 Fixed:
@@ -363,8 +366,10 @@ class Model(QWidget):
     """
     A widget to display the simulation model and control parameters sliders.
     """
-    def __init__(self, parameters: dict, observations_file: str = None) -> None:
+    def __init__(self, parameters: dict, calculate_data, observations_file: str = None) -> None:
+        from space import Star
         super().__init__()
+        self.calculate_data = calculate_data
 
         if observations_file is None:
             self.observations = None
@@ -432,7 +437,7 @@ class Model(QWidget):
             self.time_shift_slider()
 
         # Additional parameters
-        data_label = QLabel(f"τ_μ: {self.specific_absorption_coefficient / (m**2/g)}m²/g    R: {self.star_radius / km}km    T: {self.temperature / K}K    log(g): {self.log_g}    λ: {self.wavelength / angstrom}Å    band: {self.band}    px: {self.pixel_size / km}km")
+        data_label = QLabel(f"κ: {self.specific_absorption_coefficient / (m**2/g)}m²/g    R: {self.star_radius / km}km    T: {self.temperature / K}K    log(g): {self.log_g}    λ: {self.wavelength / angstrom}Å    band: {self.band}    px: {self.pixel_size / km}km")
         self.layout.addWidget(data_label, alignment=Qt.AlignmentFlag.AlignLeft)
 
         # Show animation button
@@ -596,7 +601,7 @@ class Model(QWidget):
         self.ax.set_title("Simulation Result")
 
         try:
-            lightcurve = data[1][1]
+            lightcurve = data
         except IndexError:
             lightcurve = [(0,0), (1,0)]
 
@@ -666,39 +671,6 @@ class Model(QWidget):
 
         self.defaults['mass'].update(m_min / kg, m_max / kg)
 
-    @staticmethod
-    def calculate_data(exoplanet_sma: Union[float, Measure.Unit], exoplanet_orbit_eccentricity: Union[float, Measure.Unit], exoplanet_orbit_inclination: Union[float, Measure.Unit], exoplanet_longitude_of_ascending_node: Union[float, Measure.Unit], exoplanet_argument_of_periapsis: Union[float, Measure.Unit], exoplanet_radius: Union[float, Measure.Unit], exoplanet_mass: Union[float, Measure.Unit], density: Union[float, Measure.Unit], eccentricity: Union[float, Measure.Unit], sma: Union[float, Measure.Unit], width: Union[float, Measure.Unit], mass: Union[float, Measure.Unit], obliquity: Union[float, Measure.Unit], azimuthal_angle: Union[float, Measure.Unit], argument_of_periapsis: Union[float, Measure.Unit], specific_absorption_coefficient: float, star: Star, pixel_size: int, **kwargs) -> tuple:
-        """Calculate the simulation data"""
-        # Parameters
-        exoplanet_sma = exoplanet_sma.set(au)
-        exoplanet_orbit_inclination = exoplanet_orbit_inclination.set(deg)
-        exoplanet_longitude_of_ascending_node = exoplanet_longitude_of_ascending_node.set(deg)
-        exoplanet_argument_of_periapsis = exoplanet_argument_of_periapsis.set(deg)
-        exoplanet_radius = exoplanet_radius.set(km)
-        exoplanet_mass = exoplanet_mass.set(kg)
-        density = density.set(gcm3)
-        sma = sma.set(km)
-        width = width.set(km)
-        mass = mass.set(kg)
-        obliquity = obliquity.set(deg)
-        azimuthal_angle = azimuthal_angle.set(deg)
-        argument_of_periapsis = argument_of_periapsis.set(deg)
-
-        stellar_mass = star.mass
-
-        rings = Rings(density, eccentricity, sma, width, obliquity, azimuthal_angle, argument_of_periapsis, mass, specific_absorption_coefficient)  # create rings
-        orbit = Orbit(exoplanet_sma, exoplanet_orbit_eccentricity, exoplanet_orbit_inclination, exoplanet_longitude_of_ascending_node, exoplanet_argument_of_periapsis, stellar_mass, pixel_size) # create exoplanet orbit
-        exoplanet = Exoplanet(rings, orbit, exoplanet_radius, exoplanet_mass, pixel_size)  # create exoplanet
-
-        print(exoplanet)
-
-        print(star)
-
-        data = star.transit(exoplanet)
-        transit_duration = data[0]
-
-        return data, transit_duration, exoplanet
-
     def show_animation_window(self):
         """Open the animation window with error handling."""
         try:
@@ -711,14 +683,12 @@ class Model(QWidget):
             print("Error during animation:", e)
             traceback.print_exc()
 
-
-class AnimationWindow(QDialog):
-    """transit animation window (opened using the "Show transit animation" window)"""
-    def __init__(self, star, exoplanet, parent=None):
+class FramesWindow(QDialog):
+    def __init__(self, frames, parent=None, title: str = "Ringed Exoplanet Transit Simulation", size: tuple[int] = (600, 600), modal: bool = True, suffix: str = ''):
         super().__init__(parent)
-        self.setWindowTitle("Ringed Exoplanet Transit Simulation")
-        self.setModal(True)
-        self.resize(600, 600)
+        self.setWindowTitle(title)
+        self.setModal(modal)
+        self.resize(size[0], size[1])
 
         self.layout = QVBoxLayout()
         self.label = QLabel()
@@ -726,7 +696,7 @@ class AnimationWindow(QDialog):
         self.layout.addWidget(self.label)
         self.setLayout(self.layout)
 
-        self.frames = star.transit_frames(exoplanet) # Generate frames
+        self.frames = frames
         self.current_frame_index = 0
 
         self.timer = QTimer()
@@ -746,5 +716,125 @@ class AnimationWindow(QDialog):
         self.label.setPixmap(pixmap)
         self.current_frame_index = (self.current_frame_index + 1) % len(self.frames)
 
+    def save_frames(self, _dir="animation"):
+        """
+        Saves the stored QImage frames into a folder.
+
+        :param _dir: Folder for saving the frames
+        :return:
+        """
+        if _dir not in os.listdir():
+            os.mkdir(_dir)
+        for i in range(len(self.frames)):
+            self.frames[i].save(f'{_dir}/{_dir}{i}.jpg')
+
+    def save_gif(self, filename="animation.gif"):
+        """
+        Converts the stored QImage frames into a GIF animation and saves it.
+
+        Args:
+            filename (str): The name of the GIF file to save.
+        """
+        if not self.frames:
+            print("No frames available to save as GIF.")
+            return
+
+        pil_images = []
+        for i, qimage in enumerate(self.frames):
+            if qimage.isNull():
+                print(f"Skipping invalid frame at index {i}")
+                continue
+
+            # Convert QImage to bytes (PNG format) using a QBuffer
+            buffer = QBuffer()
+            buffer.open(QIODevice.OpenModeFlag.WriteOnly)
+            qimage.save(buffer, "PNG")
+            buffer.close()
+
+            # Load bytes into a PIL Image
+            try:
+                pil_image = Image.open(BytesIO(buffer.data()))
+                pil_images.append(pil_image)
+            except Exception as e:
+                print(f"Error converting QImage to PIL Image for frame {i}: {e}")
+                continue
+
+        if not pil_images:
+            print("No valid images could be converted for GIF creation.")
+            return
+
+        # Save the PIL images as an animated GIF
+        try:
+            # The first image is saved, and subsequent images are appended
+            # duration is in milliseconds, matching the QTimer interval
+            # loop=0 means the GIF will loop indefinitely
+            pil_images[0].save(
+                filename,
+                save_all=True,
+                append_images=pil_images[1:],
+                duration=self.timer.interval(),
+                loop=0
+            )
+            print(f"Animation successfully saved as {filename}")
+        except Exception as e:
+            print(f"Error saving GIF: {e}")
+
+
+class AnimatedGraph(FramesWindow):
+    def __init__(self, x_data, y_data, title="Transit Light Curve", parent=None, size: tuple[int] = (600, 600), x_label = 'Phase', y_label = 'Magnitude Change', invert_x: bool = False, invert_y: bool = True, legend: str = 'model', modal: bool = True):
+        self.x_label = x_label
+        self.y_label = y_label
+        self.invert_x = invert_x
+        self.invert_y = invert_y
+        self.legend = legend
+        frames = self._generate_highlight_frames(x_data, y_data)
+
+        super().__init__(frames, parent, title, size, modal)
+
+    def _generate_highlight_frames(self, x_data, y_data) -> list[QImage]:
+        """
+        Generates a list of QImage frames from a Matplotlib plot,
+        with each frame highlighting a different data point.
+        """
+        frames = []
+        num_points = len(x_data)
+
+        for i in range(num_points):
+            # Create a Matplotlib figure for each frame
+            fig, ax = plt.subplots(figsize=(6, 6))
+
+            # Plot all points in blue
+            ax.plot(x_data, y_data, label=self.legend)
+
+            # Highlight the i-th point in red
+            ax.plot(x_data[i], y_data[i], 'ro', markersize=10, label=f'current phase {(i + 1) / num_points}')
+
+            if self.invert_x:
+                ax.invert_xaxis()
+
+            if self.invert_y:
+                ax.invert_yaxis()
+
+            ax.set_xlabel(self.x_label)
+            ax.set_ylabel(self.y_label)
+            ax.legend()
+
+            # Convert the Matplotlib figure to a QImage
+            # Use a BytesIO object to capture the figure as a PNG
+            buf = BytesIO()
+            fig.savefig(buf, format='png', bbox_inches='tight', pad_inches=0.1)
+            plt.close(fig)  # Close the figure to free up memory
+            buf.seek(0)
+
+            # Create a QImage from the PNG data
+            image = QImage.fromData(buf.getvalue())
+            frames.append(image)
+
+        return frames
+
+class AnimationWindow(FramesWindow):
+    """transit animation window (opened using the "Show transit animation" window)"""
+    def __init__(self, star, exoplanet, parent=None, title: str = "Ringed Exoplanet Transit Simulation", size: tuple[int] = (600, 600), modal: bool = True):
+        super().__init__(star.transit_frames(exoplanet), parent, title, size, modal)
 
 app = QApplication(sys.argv)

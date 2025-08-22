@@ -90,7 +90,7 @@ class Rings:
         self.model = elliptical_ring(int(round(size)), self.px_sma, self.eccentricity, self.px_width, self.obliquity, self.azimuthal_angle, self.argument_of_periapsis, self.absorption_coefficient)
 
     def __str__(self) -> str:
-        return f'rings(d:{self.density(gcm3)}g/cm³, e:{self.eccentricity}, a:{self.sma(km)}km, w:{self.width(km)}km, θ:{self.obliquity(deg)}°, φ:{self.azimuthal_angle(deg)}°, ψ:{self.argument_of_periapsis(deg)}°, m:{self.mass(kg)}kg, τ_μ:{self.specific_absorption_coefficient}m²/g, τ:{self.absorption_coefficient}, α:{self.px_sma}px, χ_w:{self.px_width}px)'
+        return f'rings(d:{self.density/gcm3}g/cm³, e:{self.eccentricity}, a:{self.sma/km}km, w:{self.width/km}km, θ:{self.obliquity/deg}°, φ:{self.azimuthal_angle/deg}°, ψ:{self.argument_of_periapsis/deg}°, m:{self.mass/kg}kg, κ:{self.specific_absorption_coefficient/(m ** 2 / g)}m²/g, τ:{self.absorption_coefficient}, α:{self.px_sma}px, χ_w:{self.px_width}px)'
 
 class Orbit:
     """
@@ -109,7 +109,7 @@ class Orbit:
 
 
     def __str__(self):
-        return f'orbit(a:{self.sma(au)}au, e:{self.eccentricity}, i:{self.inclination(deg)}°, Ω:{self.lan(deg)}°, ω:{self.argument_of_periapsis(deg)}°, α_p:{self.px_sma}px)'
+        return f'orbit(a:{self.sma/au}au, e:{self.eccentricity}, i:{self.inclination/deg}°, Ω:{self.lan/deg}°, ω:{self.argument_of_periapsis/deg}°, α_p:{self.px_sma}px)'
 
 class Exoplanet:
     def __init__(self, rings: Rings, orbit: Orbit, radius: Measure.Unit, mass: Measure.Unit, pixel=100_000):
@@ -155,52 +155,28 @@ class Exoplanet:
         return hill_sma(self.orbit.sma, self.orbit.eccentricity, self.rings.eccentricity, stellar_mass, self.mass)
 
     def info(self):
-        return f'exoplanet(R:{self.radius(km)}km, M:{self.mass(kg)}kg, V:{self.volume(m3)}m³, D:{self.density/gcm3}g/cm³, r_a:{self.apoapsis/km}km, χ_R:{self.px_radius}px, CF:{self.crop_factor}px)'
+        return f'exoplanet(R:{self.radius/km}km, M:{self.mass/kg}kg, V:{self.volume/m3}m³, D:{self.density/gcm3}g/cm³, r_a:{self.apoapsis/km}km, χ_R:{self.px_radius}px, CF:{self.crop_factor}px)'
 
     def __str__(self):
         return self.info() + '\n' + str(self.orbit) + '\n' + str(self.rings)
 
-class Star:
-    def __init__(self, radius: Union[float, Measure.Unit], temperature: Union[float, Measure.Unit] = 8000, log_g: Union[float, Measure.Unit] = 4, wavelength: Union[float, Measure.Unit] = 4687, band='V', pixel=100_000, limb_darkening_model: str = 'square-root') -> None:
+class CustomStarModel:
+    def __init__(self, model_function, radius: Union[float, Measure.Unit], log_g: Union[float, Measure.Unit], coefficients: Union[list[float], tuple[float]], pixel=100_000):
+        self.model_fn = model_function
+        if len(coefficients) != 2:
+            raise ValueError(f'The star model takes only 2 limb-darkening coefficient. You have {len(coefficients)} instead: {coefficients}')
         self.radius = radius # radius (R_S)
-        self.temperature = temperature # temperature
-        self.log_g = log_g # log(g)
-        self.mass = star_mass(self.log_g, self.radius)
-        self.wavelength = wavelength
-        self.band = band
-        self.limb_darkening_model = limb_darkening_model # limb-darkening model
-
-
-        try:
-            if self.limb_darkening_model == 'quadratic':
-                try:
-                    c1, c2 = quadratic_limb_darkening[self.temperature][self.log_g][self.band] # quadratic limb-darkening coefficients (γ_1, γ_2)
-                except KeyError:
-                    raise KeyError(f'No available darkening coefficients for star with parameters T: {self.temperature/K}K log(g): {self.log_g} band: {self.band}')
-                star_model = quadratic_star_model
-
-            elif self.limb_darkening_model == 'square-root':
-                try:
-                    c1, c2 = square_root_limb_darkening[self.temperature][self.log_g][self.wavelength] # square-root limb-darkening coefficients (γ_3, γ_4)
-                except KeyError:
-                    raise KeyError(f'No available darkening coefficients for star with parameters T: {self.temperature/K}K log(g): {self.log_g} wavelength: {self.wavelength/angstrom}Å')
-                star_model = square_root_star_model
-
-            else:
-                raise ValueError(f'Wrong limb darkening model selected: ' + self.limb_darkening_model)
-
-        except IndexError:
-            raise ValueError(f'Wrong star parameter value selected (temperature [{self.temperature/K}K], log_g [{self.log_g}], wavelength [{self.wavelength}] or band [{self.band}]).\nTo see available parameter values check /limb_darkening.')
-
-        self.intensity = np.sum(star_model([round(to_pixels(self.radius*2, pixel)), round(to_pixels(self.radius*2, pixel))], [c1, c2]))
-
-        # Creating the model
-        self.model = star_model([to_pixels(self.radius*2, pixel), round(to_pixels(self.radius*2, pixel))],
-                                [c1, c2])
-
+        self.log_g = log_g  # log(g)
+        self.mass = star_mass(self.log_g, self.radius) # M_S
+        self.c1 = coefficients[0] # u_1
+        self.c2 = coefficients[1] # u_2
+        self.coefficients = [self.c1, self.c2]
+        self.intensity = np.sum(self.model_fn([round(to_pixels(self.radius*2, pixel)), round(to_pixels(self.radius*2, pixel))], self.coefficients))
+        self.model = self.model_fn([to_pixels(self.radius * 2, pixel), round(to_pixels(self.radius * 2, pixel))],
+                                self.coefficients)
 
     def __str__(self):
-        return f"star(R_S: {self.radius/km}km, T: {self.temperature/K}K, log_g: {self.log_g}, λ: {self.wavelength}Å, band: {self.band})"
+        return f"star(R_S: {self.radius/km}km)"
 
     def transit(self, exoplanet: Exoplanet, steps: int=500):
         """
@@ -211,7 +187,7 @@ class Star:
         :return: [P, Δm(t)] - exoplanet period and transit light curve
         """
 
-        lightcurve = transit(
+        return transit(
             star=self.model,
             mask=exoplanet.model,
             period=exoplanet.orbit.period,
@@ -222,8 +198,6 @@ class Star:
             argument_of_periapsis=exoplanet.orbit.argument_of_periapsis,
             steps=steps
         )
-
-        return [exoplanet.orbit.period, lightcurve]
 
     def transit_frames(self, exoplanet: Exoplanet, steps: int = 500):
         """
@@ -245,3 +219,47 @@ class Star:
             argument_of_periapsis=exoplanet.orbit.argument_of_periapsis,
             steps=steps
         )
+
+class Star(CustomStarModel):
+    def __init__(self, radius: Union[float, Measure.Unit], temperature: Union[float, Measure.Unit] = 8000, log_g: Union[float, Measure.Unit] = 4, wavelength: Union[float, Measure.Unit] = 4687, band='V', pixel=100_000, limb_darkening_model: str = 'square-root') -> None:
+        self.radius = radius # radius (R_S)
+        self.temperature = temperature # temperature
+        self.log_g = log_g # log(g)
+        self.mass = star_mass(self.log_g, self.radius)
+        self.wavelength = wavelength
+        self.band = band
+        self.limb_darkening_model = limb_darkening_model # limb-darkening model
+
+
+        try:
+            if self.limb_darkening_model == 'quadratic':
+                try:
+                    c1, c2 = quadratic_limb_darkening[int(self.temperature)][float(self.log_g)][self.band] # quadratic limb-darkening coefficients (γ_1, γ_2)
+                except KeyError:
+                    raise KeyError(f'No available darkening coefficients for star with parameters T: {self.temperature/K}K log(g): {self.log_g} band: {self.band}')
+                star_model = quadratic_star_model
+
+            elif self.limb_darkening_model == 'square-root':
+                try:
+                    c1, c2 = square_root_limb_darkening[int(self.temperature)][float(self.log_g)][int(self.wavelength)] # square-root limb-darkening coefficients (γ_3, γ_4)
+                except KeyError:
+                    raise KeyError(f'No available darkening coefficients for star with parameters T: {self.temperature/K}K log(g): {self.log_g} wavelength: {self.wavelength/angstrom}Å')
+                star_model = square_root_star_model
+
+            else:
+                raise ValueError(f'Wrong limb darkening model selected: ' + self.limb_darkening_model)
+
+        except IndexError:
+            raise ValueError(f'Wrong star parameter value selected (temperature [{self.temperature/K}K], log_g [{self.log_g}], wavelength [{self.wavelength}] or band [{self.band}]).\nTo see available parameter values check /limb_darkening.')
+
+        super().__init__(star_model, self.radius, [c1, c2], pixel)
+
+
+    def __str__(self):
+        return f"star(R_S: {self.radius/km}km, T: {self.temperature/K}K, log_g: {self.log_g}, λ: {self.wavelength}Å, band: {self.band})"
+
+
+class Void:
+    def __init__(self, **kwargs):
+        for i in kwargs:
+            self.__setattr__(i, kwargs[i])

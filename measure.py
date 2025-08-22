@@ -24,6 +24,7 @@ class Measure:
         """
         self.min = self.Unit(minimum).set(unit)
         self.max = self.Unit(maximum).set(unit)
+        self.mean = (self.min + self.max) / 2
         self.unit = self.Unit(unit)
         self.range = self.max - self.min
         self.label = label
@@ -51,6 +52,9 @@ class Measure:
         :param float maximum: New maximum value of the parameter
         """
         self.__init__(minimum, maximum, self.unit, self.label)
+
+    def __contains__(self, item):
+        return self.min <= item <= self.max
 
     def __str__(self):
         """

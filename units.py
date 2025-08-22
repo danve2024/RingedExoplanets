@@ -1,9 +1,13 @@
 m = 1
 kg = 1
 g = kg/1000
+earth_mass = 6e24 * kg
 deg = 1
 m3 = 1
-km = 1_000
+cm = 0.01 * m
+km = 1_000 * m
+sun_radius = 696_340 * km
+earth_radius = 6_378 * km
 au = 149_597_870.7*km
 gcm3 = 1000
 arcmin = deg/60

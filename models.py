@@ -15,13 +15,14 @@ Uses numpy arrays to model the event of the transit
 1 - maximum matrix pixel brightness
 """
 
-def disk(radius: float, size: float = None) -> np.ndarray:
+def disk(radius: float, size: float = None, fill=np.inf) -> np.ndarray:
     """
     See formulas 2.1.1, 2.1.2
     Draws a disk of specified radius.
 
     :param radius: χ_R
     :param size: χ_a
+    :param fill: optical depth
     :return: numpy array with a disk of specified radius with values of τ(x, y)
     """
 
@@ -39,7 +40,7 @@ def disk(radius: float, size: float = None) -> np.ndarray:
     y, x = np.ogrid[:size, :size]
 
     mask = (x - center) ** 2 + (y - center) ** 2 <= radius ** 2
-    ans[mask] = np.inf
+    ans[mask] = fill
     return ans
 
 # must be edited
@@ -51,7 +52,8 @@ def elliptical_ring(
         obliquity: float,
         azimuthal_angle: float,
         argument_of_periapsis: float,
-        fill: float) -> np.array:
+        fill: float,
+        constant_fill=False) -> np.array:
     """
     See equations 2.2.3 - 2.2.26.
     Draws an elliptical ring using standard orbital parameters for orientation.
@@ -111,8 +113,8 @@ def elliptical_ring(
     if np.isclose(det_N, 0):
         return np.zeros((size, size), dtype=float)
 
-    delta_x = (m22 * X - m12 * Y) / det_N # x - x_c
-    delta_y = (-m21 * X + m11 * Y) / det_N # y - y_c
+    delta_x = (m22 * X - m12 * Y) / det_N # x_r
+    delta_y = (-m21 * X + m11 * Y) / det_N # y_r
 
     radius_proj = np.sqrt(delta_x ** 2 + delta_y ** 2) # χ_r
     true_anomaly_val = np.arctan2(delta_y, delta_x) # ν_ring
@@ -126,7 +128,10 @@ def elliptical_ring(
     ring_mask = (radius_proj >= radius_inner_theory) & (radius_proj <= radius_outer_theory)
 
     transmission_map = np.zeros((size, size), dtype=float)
-    transmission_map[ring_mask] = fill * abs(cos_angle)
+    if constant_fill:
+        transmission_map[ring_mask] = fill
+    else:
+        transmission_map[ring_mask] = fill * abs(1 / cos_angle)
 
     return transmission_map
 
@@ -206,7 +211,7 @@ def square_root_star_model(shape: list[int], coefficients: list[float]) -> np.ar
 # must be edited
 def transit(star: np.array, mask: np.array, period: float, eccentricity: float, sma: float, inclination: float,
             longitude_of_ascending_node: float, argument_of_periapsis: float,
-            steps: int = 500) -> list:
+            steps: int = 500) -> tuple:
     """
     See formulas 2.1.13 - 2.1.16 and 2.2.33 - 2.2.56
     Models the transit light curve based on orbital mechanics with optimization.
@@ -223,9 +228,8 @@ def transit(star: np.array, mask: np.array, period: float, eccentricity: float, 
     :return: Δm(t)
     """
     print('Calculating the transit...')
-
     initial_intensity = np.sum(star)
-    if initial_intensity == 0: return []
+    if initial_intensity == 0: return [], []
     data_points = []
 
     standard_inclination_rad = np.deg2rad(90.0 - inclination)
@@ -243,14 +247,52 @@ def transit(star: np.array, mask: np.array, period: float, eccentricity: float, 
     h_mask, w_mask = mask.shape
     center_x_star, center_y_star = w_star // 2, h_star // 2
 
-# finding the transit window
+    # finding the transit window
     star_radius_px = w_star / 2
     mask_radius_px = np.sqrt(h_mask ** 2 + w_mask ** 2) / 2
     max_dist_for_transit = star_radius_px + mask_radius_px
 
+    # Convert orbital angles to radians for calculation.
+    inclination_astro_rad = np.deg2rad(inclination)
+
+    numerator = 1.0
+    denominator = np.cos(inclination_astro_rad) * np.tan(lan_rad)
+
+    # Handle edge cases where tan(lan_rad) is zero or infinite
+    if abs(np.cos(lan_rad)) < 1e-9:  # Ω is 90 or 270 deg
+        u_rad = np.pi / 2.0
+    elif abs(np.sin(lan_rad)) < 1e-9:  # Ω is 0 or 180 deg
+        u_rad = 0.0
+    else:
+        u_rad = np.arctan2(numerator, denominator)
+
+    # There are two solutions for u (u and u+180°). We must choose the one when the planet is in front of the star
+    z_sign_check = -(np.cos(u_rad) * np.sin(lan_rad) +
+                     np.sin(u_rad) * np.cos(inclination_astro_rad) * np.cos(lan_rad))
+    if z_sign_check < 0:
+        u_rad += np.pi
+
+    # Calculate the true anomaly (ν) from the argument of latitude (u)
+    nu_center_rad = u_rad - arg_peri_rad
+
+    # Convert true anomaly (ν) to eccentric anomaly (E).
+    e = eccentricity
+    E_center = np.arctan2(np.sqrt(1 - e ** 2) * np.sin(nu_center_rad), e + np.cos(nu_center_rad))
+
+    # Convert eccentric anomaly (E) to mean anomaly (mm) and then to time (t).
+    M_center = E_center - e * np.sin(E_center)
+    t_center = M_center * period / (2 * np.pi)
+
+    if sma > 0:
+        estimated_duration = (period * (star_radius_px + mask_radius_px)) / (np.pi * sma)
+        half_search_window = 2.0 * estimated_duration
+    else:  # Fallback for sma=0 case
+        half_search_window = period / 100
+
+    coarse_time_points = np.linspace(t_center - half_search_window, t_center + half_search_window, 400)
+
     t_start, t_end = None, None
     in_transit = False
-    coarse_time_points = np.linspace(-period / 2, period / 2, 400)
     for t in coarse_time_points:
         M_A = mean_anomaly(t, period)
         E = eccentric_anomaly(M_A, eccentricity)
@@ -258,7 +300,7 @@ def transit(star: np.array, mask: np.array, period: float, eccentricity: float, 
         r = radius_vector(sma, eccentricity, nu)
         pos_in_orbit = np.array([r * np.cos(np.deg2rad(nu)), r * np.sin(np.deg2rad(nu)), 0])
         pos_in_3d = R_orbit @ pos_in_orbit
-        is_transiting = pos_in_3d[2] >= 0 and np.sqrt( pos_in_3d[0] ** 2 + pos_in_3d[1] ** 2) < max_dist_for_transit
+        is_transiting = pos_in_3d[2] >= 0 and np.sqrt(pos_in_3d[0] ** 2 + pos_in_3d[1] ** 2) < max_dist_for_transit
         if is_transiting and not in_transit:
             t_start = t
             in_transit = True
@@ -267,16 +309,57 @@ def transit(star: np.array, mask: np.array, period: float, eccentricity: float, 
         if in_transit and not is_transiting:
             break
 
-    if t_start is None: return [(0, 0)]
+    if t_start is None:
+        print('Unable to detect transit.')
+        return [0, [(0, 0)]]
 
     transit_duration = t_end - t_start
 
-    if transit_duration <= 0: return [(0, 0)]
+    if transit_duration <= 0: return [0, [(0, 0)]]
 
-    padding = transit_duration * 0.1  # Add padding for baseline
-    fine_time_points = np.linspace(t_start - padding, t_end + padding, steps)
+    # Find the approximate time of minimum brightness
+    padding = transit_duration * 0.1
+    first_pass_steps = max(steps // 5, 100)
+    first_pass_time_points = np.linspace(t_start - padding, t_end + padding, first_pass_steps)
 
-    for t in fine_time_points:
+    t_min = (t_start + t_end) / 2  # Fallback initialization
+    min_intensity = float('inf')
+
+    for t in first_pass_time_points:
+        M_A = mean_anomaly(t, period)
+        E = eccentric_anomaly(M_A, eccentricity)
+        nu = true_anomaly(E, eccentricity)
+        r = radius_vector(sma, eccentricity, nu)
+        pos_in_orbit = np.array([r * np.cos(np.deg2rad(nu)), r * np.sin(np.deg2rad(nu)), 0])
+        pos_in_3d = R_orbit @ pos_in_orbit
+        px, py, pz = pos_in_3d[0], pos_in_3d[1], pos_in_3d[2]
+
+        light_blocked = 0.0
+        if pz >= 0:
+            tl_x, tl_y = int(round(center_x_star + px - w_mask / 2)), int(round(center_y_star + py - h_mask / 2))
+            star_y_start, star_y_end = max(0, tl_y), min(h_star, tl_y + h_mask)
+            star_x_start, star_x_end = max(0, tl_x), min(w_star, tl_x + w_mask)
+            mask_y_start, mask_y_end = max(0, -tl_y), h_mask - max(0, (tl_y + h_mask) - h_star)
+            mask_x_start, mask_x_end = max(0, -tl_x), w_mask - max(0, (tl_x + w_mask) - w_star)
+
+            if star_y_end > star_y_start and star_x_end > star_x_start:
+                star_slice = star[star_y_start:star_y_end, star_x_start:star_x_end]
+                mask_slice = mask[mask_y_start:mask_y_end, mask_x_start:mask_x_end]
+                if star_slice.shape == mask_slice.shape:
+                    light_blocked = np.sum(star_slice - star_slice * np.exp(-mask_slice))
+
+        current_intensity = initial_intensity - light_blocked
+        if current_intensity < min_intensity:
+            min_intensity = current_intensity
+            t_min = t
+
+    # Recalculate light curve centered around t_min
+    total_duration = transit_duration + 2 * padding
+    new_start_time = t_min - total_duration / 2
+    new_end_time = t_min + total_duration / 2
+    final_time_points = np.linspace(new_start_time, new_end_time, steps)
+
+    for t in final_time_points:
         M_A = mean_anomaly(t, period)
         E = eccentric_anomaly(M_A, eccentricity)
         nu = true_anomaly(E, eccentricity)
@@ -301,11 +384,11 @@ def transit(star: np.array, mask: np.array, period: float, eccentricity: float, 
 
         current_intensity = initial_intensity - light_blocked
 
-        # Normalize time to phase [0, 1]
-        phase = (t - (t_start - padding)) / (transit_duration + 2 * padding)
+        # Normalize time to phase [0, 1] based on the new centered time window
+        phase = (t - new_start_time) / total_duration
         data_points.append((phase, current_intensity))
 
-    return [transit_duration * 1.2, light_curve(data_points)]
+    return total_duration, light_curve(data_points)
 
 def correct(array: np.array) -> np.array:
     """
@@ -328,7 +411,7 @@ def correct(array: np.array) -> np.array:
             array[x][y] = array[x][y]/max
     return array
 
-def show_model(model: np.ndarray) -> None:
+def show_model(model: np.ndarray, title='Optical Depth Distribution model', x_label='x', y_label='y', colorbar_label='Optical Depth') -> None:
     """
     Shows the given model as an image using matplotlib
 
@@ -336,7 +419,11 @@ def show_model(model: np.ndarray) -> None:
     """
     plt.figure()
     plt.imshow(model, origin='lower', cmap='viridis')
-    plt.colorbar()
+    plt.title(title)
+    cbar = plt.colorbar()
+    plt.xlabel(x_label)
+    plt.ylabel(y_label)
+    cbar.set_label(colorbar_label)
     plt.show()
 
 def transit_animation(star: np.array, mask: np.array, period: float, eccentricity: float, sma: float, inclination: float, longitude_of_ascending_node: float, argument_of_periapsis: float,
@@ -459,102 +546,24 @@ def _array_to_qimage(array: np.array) -> QImage:
     return QImage(img_array.data, width, height, width, QImage.Format.Format_Grayscale8).copy()
 
 if __name__ == '__main__':
-    # --- Performance Test with Relevant Sample Data ---
+    obliquity = 90
+    azimuthal_angle = 0
+    argument_of_periapsis = 0
+    ecc = 0.4
 
-    print("Starting performance test...")
-    start_time = time.time()
-
-    # 1. Create a large star model
-    star_size = 6001  # Must be odd
-    star_example = quadratic_star_model([star_size, star_size], [0.3, 0.3])
-
-    # 2. Create a reasonably sized opacity mask
-    mask_size = 301  # Must be odd
-    ring_mask = elliptical_ring(
-        size=mask_size, a=100, e=0.7, w=40,
-        obliquity=0, azimuthal_angle=10, argument_of_periapsis=30,
-        fill=1.5  # optical depth
+    ring = elliptical_ring(
+        size=301,
+        a=100,
+        e=ecc,
+        w=4,
+        obliquity=obliquity,
+        azimuthal_angle=azimuthal_angle,
+        argument_of_periapsis=argument_of_periapsis,
+        fill=1.4
     )
-    planet_disk = disk(radius=25, size=mask_size)
-    combined_mask = np.maximum(ring_mask, planet_disk)
-
-    # 3. Run the transit calculation
-    lightcurve_data = transit(
-        star=star_example,
-        mask=combined_mask,
-        period=1.0,
-        eccentricity=0.2,
-        sma=star_size * 0.8,  # Semi-major axis in pixels
-        inclination=2,  # Nearly edge-on orbit
-        longitude_of_ascending_node=0,
-        argument_of_periapsis=90,
-        steps=1000  # High precision for the transit
+    planet = disk(
+        radius=50,
+        size=301
     )
 
-    end_time = time.time()
-    print(f"Calculation finished in {end_time - start_time:.4f} seconds.")
-
-    show_model(star_example)
-    show_model(combined_mask)
-
-    # 4. Plotting the resulting light curve
-    if lightcurve_data and len(lightcurve_data[1]) > 1:
-        times = [item[0] for item in lightcurve_data[1]]
-        magnitudes = [item[1] for item in lightcurve_data[1]]
-
-        plt.figure(figsize=(10, 6))
-        plt.plot(times, magnitudes)
-        plt.gca().invert_yaxis()
-        plt.title("Optimized Transit Light Curve")
-        plt.xlabel("Phase")
-        plt.ylabel("Magnitude Change (Δm)")
-        plt.grid(True)
-        plt.show()
-    else:
-        print("No transit was detected with the given parameters.")
-
-    class AnimationWindow(QDialog):
-        """transit animation window (opened using the "Show transit animation" window)"""
-        def __init__(self, star, exoplanet, parent=None):
-            super().__init__(parent)
-            self.setWindowTitle("Ringed Exoplanet Transit Simulation")
-            self.setModal(True)
-            self.resize(600, 600)
-
-            self.layout = QVBoxLayout()
-            self.label = QLabel()
-            self.label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            self.layout.addWidget(self.label)
-            self.setLayout(self.layout)
-
-            self.frames = transit_animation(
-            star=star,
-            mask=exoplanet,
-            period=1.0,
-            eccentricity=0.2,
-            sma=star_size * 0.8,  # Semi-major axis in pixels
-            inclination=2,  # Nearly edge-on orbit
-            longitude_of_ascending_node=0,
-            argument_of_periapsis=90,
-            steps=1000  # High precision for the transit
-        )
-            self.current_frame_index = 0
-
-            self.timer = QTimer()
-            self.timer.timeout.connect(self.update_frame)
-            self.timer.start(33)  # ~30 FPS
-
-        def update_frame(self):
-            """Update the animation frame safely."""
-            if not self.frames:
-                return  # Avoid update if frames are missing
-
-            frame = self.frames[self.current_frame_index]
-            if frame.isNull():
-                return  # Skip invalid frames
-
-            pixmap = QPixmap.fromImage(frame)
-            self.label.setPixmap(pixmap)
-            self.current_frame_index = (self.current_frame_index + 1) % len(self.frames)
-
-    AnimationWindow(star_example, combined_mask).exec()
+    show_model(ring+planet, f'Optical depth distribution of the mask (e={ecc}, θ={obliquity}°, φ={azimuthal_angle}°, ψ={argument_of_periapsis}°)')
