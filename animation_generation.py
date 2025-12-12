@@ -8,7 +8,7 @@ from PyQt6.QtGui import QImage
 from io import BytesIO
 import matplotlib.pyplot as plt
 from formulas import roche_density, to_pixels
-from alternative_models import oblate_planet, spotted_star_transit
+from alternative_models import oblate_planet, spotted_star_transit, noise
 from units import *
 from measure import Measure
 
@@ -186,6 +186,60 @@ def draw_spotted_star_light_curve(
     return QImage.fromData(buf.getvalue())
 
 
+def draw_noisy_light_curve(A=defaults['exoplanet_sma'].min,
+                          e_p=defaults['exoplanet_orbit_eccentricity'].mean,
+                          i=2,
+                          Omega=30,
+                          omega=0,
+                          R=defaults['exoplanet_radius'].mean,
+                          M=1.9e27,
+                          R_S=defaults['star_radius'],
+                          T=defaults['star_temperature'],
+                          log_g=defaults['star_log(g)'],
+                          wavelength=defaults['wavelength'],
+                          band='u',
+                          px=defaults['pixel_size'],
+                          limb_darkening_model=defaults['limb_darkening'],
+                          noise_scale=0.01,
+                          noise_magnitude=0.001,
+                          seed=None,
+                          label='',
+                          print_values=True,
+                          **kwargs):
+    """
+    Generate a noisy light curve using the noise model.
+    
+    Args match the standard light curve functions but add noise parameters.
+    """
+    star = Star(R_S, T, log_g, wavelength, band, px, limb_darkening_model)
+    
+    # Calculate data with noise
+    data = noise(A, e_p, i, Omega, omega, R, M, star, px, noise_scale, noise_magnitude, seed, False)[0]
+
+    if print_values:
+        print(data)
+
+    fig, ax = plt.subplots(figsize=(6, 6))
+
+    # Plot all points in blue, matching draw_lightcurve style
+    ax.plot([data[i][0] for i in range(len(data))], 
+            [data[i][1] for i in range(len(data))], 
+            label='noisy model')
+
+    ax.invert_yaxis()
+    ax.set_title(f'Noisy transit light curve ({label})')
+    ax.set_xlabel('Phase')
+    ax.set_ylabel('Magnitude Change')
+    ax.legend()
+
+    # Convert to QImage
+    buf = BytesIO()
+    fig.savefig(buf, format='png', bbox_inches='tight', dpi=100)
+    plt.close(fig)
+    buf.seek(0)
+    return QImage.fromData(buf.getvalue())
+
+
 def draw_animation(fn, gif=False, name='animation', infinity=10, abbr=None, unit='', unit_coefficient=1, suffix=None,  **kwargs):
     if suffix is None:
         suffix = ''
@@ -253,3 +307,9 @@ def draw_planet_animation(gif=False, name='animation', **kwargs):
 
 def draw_spotted_star_light_curve_animation(gif=False, name='animation', **kwargs):
     draw_animation(draw_spotted_star_light_curve, gif, name, **kwargs)
+
+def draw_noisy_light_curve_animation(gif=False, name='animation', **kwargs):
+    draw_animation(draw_noisy_light_curve, gif, name, **kwargs)
+
+if __name__ == '__main__':
+    draw_noisy_light_curve_animation(noise_scale=(0,0.2,20), gif=True)

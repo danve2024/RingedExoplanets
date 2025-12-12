@@ -37,7 +37,6 @@ defaults = {
     'pixel_size': 10000 * km
 }
 
-
 def calculate_data(exoplanet_sma: Union[float, Measure.Unit], exoplanet_orbit_eccentricity: Union[float, Measure.Unit],
                    exoplanet_orbit_inclination: Union[float, Measure.Unit],
                    exoplanet_longitude_of_ascending_node: Union[float, Measure.Unit],

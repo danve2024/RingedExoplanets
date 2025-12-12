@@ -30,17 +30,23 @@ fixed_exoplanet_period = 542.08 * days  # Santerne et al., 2019
 fixed_exoplanet_sma = 1.377 * au
 fixed_specific_absorption_coefficient = defaults['specific_absorption_coefficient']
 
-# Parameter boundaries
+min_radius =  2000 * km
+max_radius = 9.2 * 6_400 * km
+max_semi_major_axis_max = roche_sma_max(max_radius, fixed_exoplanet_mass/volume(min_radius), 0, roche_density(fixed_exoplanet_mass, max_radius, 0.9))
+max_width_max = max_semi_major_axis_max - min_radius
+
 specific_parameter_boundaries = {
-    'exoplanet_orbit_eccentricity': (0, 0.1),
-    'exoplanet_orbit_inclination': (85, 90),
+    'exoplanet_orbit_eccentricity': (0, 0.4),
+    'exoplanet_orbit_inclination': (0, 90),
     'exoplanet_longitude_of_ascending_node': (90 - 5e-8, 90 + 5e-8),
-    'exoplanet_argument_of_periapsis': (0, 0.1),
-    'exoplanet_radius': (40_000 * km, 50_000 * km),
-    'eccentricity': (0.3, 0.4),
-    'obliquity': (85, 90),
-    'azimuthal_angle': (0, 0.1),
-    'argument_of_periapsis': (0, 0.1)
+    'exoplanet_argument_of_periapsis': (0, 180),
+    'exoplanet_radius': (min_radius, max_radius),
+    'eccentricity': (0, 0.9),
+    'semi_major_axis': (min_radius, max_semi_major_axis_max), # dynamic boundaries
+    'width': (0, max_width_max), # dynamic boundaries
+    'obliquity': (0, 90),
+    'azimuthal_angle': (0, 180),
+    'argument_of_periapsis': (0, 180)
 }
 
 class NestedSamplingAnalysis:
@@ -55,6 +61,11 @@ class NestedSamplingAnalysis:
         self.results_file = results_file
         self.load_results()
         self.load_observations()
+        
+        # Calculate prior standard deviation for uniform distributions
+        # For uniform distribution U(a,b), the standard deviation is (b-a)/sqrt(12)
+        param_bounds = list(specific_parameter_boundaries.values())
+        self.prior_stdev = np.array([(high - low) / np.sqrt(12) for low, high in param_bounds])
         
     def load_results(self):
         """Load the nested sampling results from file."""
@@ -121,6 +132,120 @@ class NestedSamplingAnalysis:
         # Return combined data, sorted by phase
         sorted_indices = np.argsort(phases)
         self.observations = np.vstack((phases[sorted_indices], all_mag_changes[sorted_indices])).T
+
+    def kfold_split(self, n_splits: int, removed: List[int], _dir: str = 'kfold_observations.jpg',
+                    title: str = 'K-Fold Observational Light Curve',
+                    x_label: str = 'Phase',
+                    y_label: str = 'Magnitude Change',
+                    invert_x: bool = False,
+                    invert_y: bool = True):
+        """
+        Loads observational data from specified CSV files, performs k-fold splitting,
+        removes specified chunks, converts flux to magnitude change, calculates the orbital phase,
+        and generates a plot of the remaining data.
+
+        Args:
+            n_splits: Number of chunks to split the data into
+            removed: List of chunk indices to remove (0-based indexing)
+            _dir: Output filename for the plot
+            title: Plot title
+            x_label: X-axis label
+            y_label: Y-axis label
+            invert_x: Whether to invert the x-axis
+            invert_y: Whether to invert the y-axis
+        """
+        print(f"Loading and processing observational data with {n_splits}-fold splitting...")
+        print(f"Removing chunks: {removed}")
+
+        all_times = []
+        all_mag_changes = []
+
+        plt.figure(figsize=(12, 7))
+
+        files = {
+            "C18 short cadence": ("observations/C18_short_cadence.csv", "red"),
+            "C18 long cadence": ("observations/C18_long_cadence.csv", "green"),
+            "C5": ("observations/C5.csv", "blue"),
+        }
+
+        # Load data from each file
+        for label, (filename, color) in files.items():
+            try:
+                df = pd.read_csv(filename, header=None, names=['time', 'flux'])
+                mag_change = -2.5 * np.log10(df['flux'])
+
+                all_times.extend(df['time'].tolist())
+                all_mag_changes.extend(mag_change.tolist())
+
+            except FileNotFoundError:
+                print(f"Warning: Could not find the file {filename}. Skipping.")
+                continue
+            except Exception as e:
+                print(f"An error occurred while reading {filename}: {e}")
+                continue
+
+        if not all_times:
+            print("No data was loaded. Exiting.")
+            sys.exit(1)
+
+        all_times = np.array(all_times)
+        all_mag_changes = np.array(all_mag_changes)
+        observations_duration = np.max(all_times) - np.min(all_times)
+
+        phases = (all_times / observations_duration) + 0.5
+
+        sorted_indices = np.argsort(phases)
+        sorted_phases = phases[sorted_indices]
+        sorted_mag_changes = all_mag_changes[sorted_indices]
+
+        chunk_size = len(sorted_phases) // n_splits
+        chunks_phases = []
+        chunks_mag_changes = []
+
+        for i in range(n_splits):
+            start_idx = i * chunk_size
+            if i == n_splits - 1:  # Last chunk gets remaining data
+                end_idx = len(sorted_phases)
+            else:
+                end_idx = (i + 1) * chunk_size
+
+            chunks_phases.append(sorted_phases[start_idx:end_idx])
+            chunks_mag_changes.append(sorted_mag_changes[start_idx:end_idx])
+
+        remaining_phases = []
+        remaining_mag_changes = []
+        for i, (chunk_phases, chunk_mag_changes) in enumerate(zip(chunks_phases, chunks_mag_changes)):
+            if i not in removed:
+                remaining_phases.extend(chunk_phases)
+                remaining_mag_changes.extend(chunk_mag_changes)
+
+        if not remaining_phases:
+            print("All chunks were removed. No data remaining.")
+            sys.exit(1)
+
+        remaining_phases = np.array(remaining_phases)
+        remaining_mag_changes = np.array(remaining_mag_changes)
+
+        # Plot the remaining data
+        plt.plot(remaining_phases, remaining_mag_changes, 'o',
+                 markersize=3, color='blue', alpha=0.7, label='Training Data')
+
+        plt.xlabel(x_label)
+        plt.ylabel(y_label)
+        plt.title(f"{title} (Chunks {list(set(range(n_splits)) - set(removed))} retained)")
+        plt.grid(True)
+        plt.legend()
+        if invert_x:
+            plt.gca().invert_xaxis()
+        if invert_y:
+            plt.gca().invert_yaxis()
+        plt.savefig(_dir)
+        plt.close()
+        print(f"K-fold observational data plot saved to {_dir}")
+
+        sorted_remaining_indices = np.argsort(remaining_phases)
+        self.observations = np.vstack((remaining_phases[sorted_remaining_indices],
+                                       remaining_mag_changes[sorted_remaining_indices])).T
         
     def get_posterior_samples(self, nsamples=1000):
         """Get posterior samples from the nested sampling results."""
@@ -138,7 +263,15 @@ class NestedSamplingAnalysis:
         ans = ''
         for i in range(len(self.labels)):
             percentiles = np.percentile(samples[:, i], [q1, q2, q3])
-            ans += f"{self.labels[i]:<28}: {percentiles[1]:.3f} +{percentiles[2] - percentiles[1]:.3f} / -{percentiles[1] - percentiles[0]:.3f}\n"
+            
+            # Calculate posterior standard deviation (approximate from percentiles)
+            # Using the interquartile range divided by 1.349 as a robust estimator
+            posterior_stdev = (percentiles[2] - percentiles[0]) / 1.349
+            
+            # Calculate shrinkage:
+            shrinkage = 1 - (posterior_stdev / self.prior_stdev[i])
+            
+            ans += f"{self.labels[i]:<28}: {percentiles[1]:.3f} +{percentiles[2] - percentiles[1]:.3f} / -{percentiles[1] - percentiles[0]:.3f} (shrinkage: {shrinkage:.4f})\n"
         
         ans += f"\nLog-evidence: {self.logz[-1]:.2f} +/- {np.std(self.logz):.2f}\n"
         
@@ -182,7 +315,6 @@ class NestedSamplingAnalysis:
                 plot_contours=True,
                 fill_contours=True,
                 levels=1.0 - np.exp(-0.5 * np.array([1.0, 2.0]) ** 2),
-                color='#0072B2',  # Blue for posterior
                 alpha=0.5,
                 bins=30,
                 smooth=1.0,
@@ -457,7 +589,7 @@ class NestedSamplingAnalysis:
         plt.close()
         print(f"Correlation heatmap saved to {filename}")
     
-    def analyze(self):
+    def analyze(self, folder: str = ''):
         """Run all analyses and save results."""
         print("Running complete nested sampling analysis...")
         
@@ -465,12 +597,12 @@ class NestedSamplingAnalysis:
         sns.set_theme(style="whitegrid")
         
         # Run all analyses
-        self.corner_plot()
-        self.best_fit_vs_observations()
-        self.ppc()
-        self.trace_plots()
-        self.parameter_distributions()
-        self.correlation_heatmap()
+        self.corner_plot(folder + 'corner_plot.png')
+        self.best_fit_vs_observations(folder + 'best_fit_model_vs_observed_data.png')
+        self.ppc(filename=folder + 'ppc.png')
+        self.trace_plots(folder + 'trace_plots.png')
+        self.parameter_distributions(folder + 'parameter_distributions.png')
+        self.correlation_heatmap(folder + 'correlation_heatmap.png')
         
         # Generate summary statistics
         stats = self.summary()
@@ -478,7 +610,7 @@ class NestedSamplingAnalysis:
         print(stats)
         
         # Save summary to file
-        with open('nested_sampling_analysis_summary.txt', 'w') as f:
+        with open(folder + 'nested_sampling_analysis_summary.txt', 'w') as f:
             f.write("Complete Nested Sampling Analysis Results\n")
             f.write("==========================================\n\n")
             f.write("Parameter estimates (50th percentile) with 1-sigma uncertainties:\n")
@@ -498,5 +630,6 @@ class NestedSamplingAnalysis:
 
 if __name__ == "__main__":
     # Initialize and run the complete analysis
-    analyzer = NestedSamplingAnalysis()
-    analyzer.analyze()
+    analyzer = NestedSamplingAnalysis('kfolds/0/nested_sampling_result.npz')
+    analyzer.kfold_split(20, [5])
+    analyzer.analyze('kfolds/0/')

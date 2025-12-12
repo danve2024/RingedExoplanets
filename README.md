@@ -11,9 +11,7 @@ This project provides a comprehensive framework for modeling and analyzing trans
 - Parameter boundaries optimized for HIP 41378f analysis
 - Methods for saving results and generating analysis plots
 
-### Minimum Configuration for HIP 41378f Analysis
-
-The minimum configuration in `nested_sampling.py` includes:
+### Main Ringed Planet Model (`nested_sampling.py`)
 
 **Fixed Parameters:**
 - Star radius: 1.28 × solar radius (Grouffal et al., 2022)
@@ -23,21 +21,67 @@ The minimum configuration in `nested_sampling.py` includes:
 - Exoplanet orbital period: 542.08 days (Santerne et al., 2019)
 - Exoplanet semi-major axis: 1.377 AU
 - Observation duration: 80 hours
+- Pixel size: From defaults
+- Specific absorption coefficient: From defaults
 
 **Parameter Boundaries (11 dimensions):**
-- Exoplanet orbit eccentricity: (0, 0.1)
-- Exoplanet orbit inclination: (85°, 90°)
+- Exoplanet orbit eccentricity: (0, 0.4)
+- Exoplanet orbit inclination: (0°, 90°)
 - Exoplanet longitude of ascending node: (90° - 5e-8, 90° + 5e-8)
-- Exoplanet argument of periapsis: (0, 0.1)
-- Exoplanet radius: (40,000 km, 50,000 km)
-- Ring eccentricity: (0.3, 0.4)
+- Exoplanet argument of periapsis: (0°, 180°)
+- Exoplanet radius: (2,000 km, 58,880 km) [9.2 × Earth radius]
+- Ring eccentricity: (0, 0.9)
 - Ring semi-major axis: (dynamic, based on Roche limit)
-- Ring width: (0, dynamic maximum)
-- Ring obliquity: (85°, 90°)
-- Ring azimuthal angle: (0, 0.1)
-- Ring argument of periapsis: (0, 0.1)
+- Ring width: (0, dynamic maximum based on Roche limit)
+- Ring obliquity: (0°, 90°)
+- Ring azimuthal angle: (0°, 180°)
+- Ring argument of periapsis: (0°, 180°)
 
-**Observation Files:**
+### Noise Model (`noise_nested_sampling.py`)
+
+**Parameter Boundaries (7 dimensions):**
+- Exoplanet orbit eccentricity: (0, 0.4)
+- Exoplanet orbit inclination: (0°, 90°)
+- Exoplanet longitude of ascending node: (90° - 5e-8, 90° + 5e-8)
+- Exoplanet argument of periapsis: (0°, 180°)
+- Exoplanet radius: (2,000 km, 128,000 km)
+- Noise scale: (0, auto-calculated from data)
+- Noise magnitude: (0, auto-calculated from data)
+
+### Oblate Planet Model (`oblate_planet_nested_sampling.py`)
+
+**Parameter Boundaries (7 dimensions):**
+- Exoplanet orbit eccentricity: (0, 0.4)
+- Exoplanet orbit inclination: (0°, 90°)
+- Exoplanet longitude of ascending node: (90° - 5e-8, 90° + 5e-8)
+- Exoplanet argument of periapsis: (0°, 180°)
+- Exoplanet radius: (2,000 km, 128,000 km)
+- Planet oblateness: (0, 1)
+- Projection rotation: (0°, 180°)
+
+### Ringless Model (`ringless_nested_sampling.py`)
+
+**Parameter Boundaries (5 dimensions):**
+- Exoplanet orbit eccentricity: (0, 0.4)
+- Exoplanet orbit inclination: (0°, 90°)
+- Exoplanet longitude of ascending node: (90° - 5e-8, 90° + 5e-8)
+- Exoplanet argument of periapsis: (0°, 180°)
+- Exoplanet radius: (2,000 km, 128,000 km)
+
+### Star Spots Model (`star_spots_nested_sampling.py`)
+
+**Parameter Boundaries (9 dimensions):**
+- Exoplanet orbit eccentricity: (0, 0.4)
+- Exoplanet orbit inclination: (0°, 90°)
+- Exoplanet longitude of ascending node: (90° - 5e-8, 90° + 5e-8)
+- Exoplanet argument of periapsis: (0°, 180°)
+- Exoplanet radius: (2,000 km, 128,880 km)
+- Star angular velocity: (0, 1800 °/day)
+- Spot longitude: (0°, 360°)
+- Spot radius: (0, 1) [in star radii]
+- Spot brightness: (0, 2) [relative to star]
+
+**Common Observation Files (for all models):**
 - C18 short cadence: `observations/C18_short_cadence.csv`
 - C18 long cadence: `observations/C18_long_cadence.csv`
 - C5: `observations/C5.csv`

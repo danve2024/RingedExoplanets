@@ -1,0 +1,14 @@
+Parameter estimates (50th percentile) with 1-sigma uncertainties:
+Orbit Eccentricity          : 0.000 +0.000 / -0.000
+Orbit Inclination, °        : 68.469 +0.007 / -0.008
+Ex. Long. Asc. Node, °      : 90.000 +0.000 / -0.000
+Ex. Arg. of Periapsis, °    : 0.858 +0.000 / -0.002
+Exoplanet Radius, km        : 59779507.695 +404309.939 / -219370.865
+Ring Eccentricity           : 0.611 +0.048 / -0.035
+Ring Semi-Major Axis, km    : 14945584.494 +742222.659 / -985956.785
+Ring Width, km              : 1138470.278 +136636.654 / -277249.211
+Ring Obliquity, °           : 16.744 +2.945 / -6.054
+Ring Azimuthal Angle, °     : 84.015 +24.053 / -27.476
+Ring Arg. of Periapsis, °   : 40.501 +9.777 / -13.373
+
+Log-evidence: 2015.91 +/- inf

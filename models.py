@@ -327,7 +327,6 @@ def transit(star: np.array, mask: np.array, period: float, eccentricity: float, 
     :param spot_brightness: β
     :return: Δm(t)
     """
-    print('Calculating the transit...')
     initial_intensity = np.sum(star)
     if initial_intensity == 0: return [], []
     data_points = []
@@ -410,7 +409,7 @@ def transit(star: np.array, mask: np.array, period: float, eccentricity: float, 
             break
 
     if t_start is None:
-        print('Unable to detect transit.')
+        print(f'No transit (P={period}s, e_p={eccentricity}, A={sma}px, i={inclination}°, Ω={longitude_of_ascending_node}°, ω={argument_of_periapsis}°)')
         return [0, [(0, 0)]]
 
     transit_duration = t_end - t_start
