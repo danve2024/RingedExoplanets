@@ -1,12 +1,13 @@
 import os.path
 import json
 
+import visualization
 from units import *
 from formulas import *
 from measure import Measure
 from math import exp
 from typing import Union
-from models import disk, elliptical_ring, transit, quadratic_star_model, square_root_star_model, transit_animation
+from models import disk, elliptical_ring, transit, quadratic_star_model, square_root_star_model, transit_animation, planet, show_model, _array_to_qimage
 import numpy as np
 
 # Functions that require other Solar System objects
@@ -81,6 +82,9 @@ class Rings:
         self.px_width = to_pixels(self.width, pixel)
         self.model = elliptical_ring(self.size, self.px_sma, self.eccentricity, self.px_width, self.obliquity, self.azimuthal_angle, self.argument_of_periapsis, self.absorption_coefficient)
 
+    def display(self):
+        show_model(self.model)
+
     def adjust(self, size) -> None:
         """
         Adjusts the ring model size.
@@ -107,39 +111,75 @@ class Orbit:
 
         self.px_sma = to_pixels(sma, pixel) # semi-major axis in pixels (α_p)
 
-
     def __str__(self):
         return f'orbit(a:{self.sma/au}au, e:{self.eccentricity}, i:{self.inclination/deg}°, Ω:{self.lan/deg}°, ω:{self.argument_of_periapsis/deg}°, α_p:{self.px_sma}px)'
 
 class Exoplanet:
-    def __init__(self, rings: Rings, orbit: Orbit, radius: Measure.Unit, mass: Measure.Unit, pixel=100_000):
+    def __init__(self, orbit: Orbit, radius: Measure.Unit, mass: Measure.Unit, rings: Rings = None,
+                 oblateness: float = 0.0, rotation_angle: float = 0.0, pixel=100_000):
         """
         Sets exoplanet parameters and creates its numpy mask array representation with its rings.
+        
+        Args:
+            rings: The planet's ring system
+            orbit: The planet's orbital parameters
+            radius: The planet's equatorial radius
+            mass: The planet's mass
+            oblateness: Flattening factor (0 = sphere, ~0.3 = highly oblate)
+            rotation_angle: Rotation angle in degrees (0-360)
+            pixel: Pixel scale in meters per pixel
         """
         # Asteroid parameters
-        self.rings = rings # ring
-        self.orbit = orbit # orbit
-        self.radius = radius # radius (R)
-        self.mass = mass # mass (M)
-        self.volume = volume(self.radius) # volume (V)
-        self.density = self.mass / self.volume # density (D), see formula 2.3.3
-        self.pixel = pixel # pixel size (px)
+        self.rings = rings  # ring
+        self.orbit = orbit  # orbit
+        self.radius = radius  # equatorial radius (R)
+        self.mass = mass  # mass (M)
+        self.oblateness = float(oblateness)  # flattening factor
+        self.rotation_angle = float(rotation_angle)  # rotation angle in degrees
+        self.volume = volume(self.radius)  # volume (V)
+        self.density = self.mass / self.volume  # density (D), see formula 2.3.3
+        self.pixel = pixel  # pixel size (px)
+        self.polar_radius = self.radius * (1 - self.oblateness)  # polar radius
 
-        self.px_radius = to_pixels(self.radius, self.pixel) # radius in pixels (χ_R)
+        self.px_radius = to_pixels(self.radius, self.pixel)  # radius in pixels (χ_R)
+        self.px_polar_radius = to_pixels(self.polar_radius, self.pixel)  # polar radius in pixels
 
-        # Parameters for limiting the sliders
-        self.min_roche_sma = max(roche_sma_min(self.radius, self.density, self.rings.eccentricity, self.rings.density), self.radius / (1 + self.rings.eccentricity)) # a_Roche_min
-        self.max_roche_sma = roche_sma_max(self.radius, self.density, self.rings.eccentricity, self.rings.density) # a_Roche_max
-        self.maximum_ring_mass = maximum_ring_mass(self.mass, self.radius, self.rings.sma, self.rings.eccentricity) # m_max
+        if self.rings is None:
+            self.min_roche_sma, self.max_roche_sma, self.maximum_ring_mass, self.apoapsis = 0, 0, 0, 0
+            self.crop_factor = to_pixels(self.radius * 20, pixel)
+        else:
+            # Parameters for limiting the sliders
+            self.min_roche_sma = max(
+                roche_sma_min(self.radius, self.density, self.rings.eccentricity, self.rings.density),
+                self.radius / (1 + self.rings.eccentricity)
+            )  # a_Roche_min
+            self.max_roche_sma = roche_sma_max(
+                self.radius, self.density, self.rings.eccentricity, self.rings.density
+            )  # a_Roche_max
+            self.maximum_ring_mass = maximum_ring_mass(
+                self.mass, self.radius, self.rings.sma, self.rings.eccentricity
+            )  # m_max
 
-        # Create exoplanet model with its rings
-        self.rings.init(int(round(to_pixels(2 * self.radius))), pixel)
-        self.apoapsis = self.rings.sma * (1 + self.rings.eccentricity) # apoapsis (r_a), see formula 2.3.4
-        self.crop_factor = to_pixels(max(2 * self.radius, 2 * self.apoapsis), pixel) # cropping factor (CF), see formula 2.3.5
-        self.disk = disk(to_pixels(self.radius), self.crop_factor) # disk
-        self.rings.adjust(self.crop_factor)
-        self.adjust(self.crop_factor + self.rings.px_width * (1 + self.rings.eccentricity))
-        self.model = self.disk + self.rings.model
+            # Create exoplanet model with its rings
+            self.rings.init(int(round(to_pixels(2 * self.radius))), pixel)
+            self.apoapsis = self.rings.sma * (1 + self.rings.eccentricity)  # apoapsis (r_a)
+            self.crop_factor = to_pixels(max(2 * self.radius, 2 * self.apoapsis), pixel)  # cropping factor (CF)
+        
+        # Create planet model
+        self.disk = planet(
+            radius=self.px_radius,
+            size=self.crop_factor,
+            fill=np.inf,
+            oblateness=self.oblateness,
+            rotation_angle=self.rotation_angle
+        )
+        
+        if self.rings is None:
+            self.model = self.disk
+        else:
+            self.rings.adjust(self.crop_factor)
+            self.adjust(self.crop_factor + self.rings.px_width * (1 + self.rings.eccentricity))
+            self.model = self.disk + self.rings.model
 
     def adjust(self, size: Union[float, Measure.Unit]) -> None:
         """
@@ -147,11 +187,22 @@ class Exoplanet:
 
         :param size: matrix size (used for matrices concatenation)
         """
-        self.disk = disk(to_pixels(self.radius, self.pixel), size)
+        self.disk = planet(
+            radius=self.px_radius,
+            size=size,
+            fill=np.inf,
+            oblateness=self.oblateness,
+            rotation_angle=self.rotation_angle
+        )
         self.rings.adjust(size)
         self.model = self.disk + self.rings.model
 
+    def display(self):
+        show_model(self.model)
+
     def hill_sma(self, stellar_mass):
+        if self.rings is None:
+            return 0
         return hill_sma(self.orbit.sma, self.orbit.eccentricity, self.rings.eccentricity, stellar_mass, self.mass)
 
     def info(self):
@@ -160,20 +211,46 @@ class Exoplanet:
     def __str__(self):
         return self.info() + '\n' + str(self.orbit) + '\n' + str(self.rings)
 
+class StarSpot:
+    def __init__(self, initial_longitude=0., radius=0., brightness=1.):
+        self.longitude = initial_longitude  # λ_0
+        self.radius = radius  # ρ
+        self.brightness = brightness  # β
+
 class CustomStarModel:
-    def __init__(self, model_function, radius: Union[float, Measure.Unit], log_g: Union[float, Measure.Unit], coefficients: Union[list[float], tuple[float]], pixel=100_000):
+    def __init__(self, model_function, radius: Union[float, Measure.Unit], log_g: Union[float, Measure.Unit], coefficients: Union[list[float], tuple[float]], pixel=100_000, angular_velocity=0, spot: StarSpot = None):
         self.model_fn = model_function
         if len(coefficients) != 2:
-            raise ValueError(f'The star model takes only 2 limb-darkening coefficient. You have {len(coefficients)} instead: {coefficients}')
-        self.radius = radius # radius (R_S)
-        self.log_g = log_g  # log(g)
-        self.mass = star_mass(self.log_g, self.radius) # M_S
-        self.c1 = coefficients[0] # u_1
-        self.c2 = coefficients[1] # u_2
+            raise ValueError(f'The star model takes only 2 limb-darkening coefficients. You have {len(coefficients)} instead: {coefficients}')
+            
+        # Store parameters
+        self.radius = radius  # radius (R_S)
+        self.log_g = log_g    # log(g)
+        self.mass = star_mass(self.log_g, self.radius)  # M_S
+        self.c1 = coefficients[0]  # u_1
+        self.c2 = coefficients[1]  # u_2
         self.coefficients = [self.c1, self.c2]
-        self.intensity = np.sum(self.model_fn([round(to_pixels(self.radius*2, pixel)), round(to_pixels(self.radius*2, pixel))], self.coefficients))
-        self.model = self.model_fn([to_pixels(self.radius * 2, pixel), round(to_pixels(self.radius * 2, pixel))],
-                                self.coefficients)
+        self.pixel = pixel
+        self.angular_velocity = angular_velocity # ω_spot
+        self.spot = spot
+        if self.spot is None:
+            self.spot = StarSpot()
+        
+        # Calculate model dimensions - ensure it's large enough and odd-sized
+        model_size = max(101, 2 * int(round(to_pixels(self.radius, pixel)))) + 1  # Ensure odd size for symmetry
+        
+        # Create the star model
+        self.base_model = self.model_fn([model_size, model_size], self.coefficients)
+        self.model = self.base_model.copy()
+
+        # Calculate total intensity (flux)
+        self.intensity = np.sum(self.model)
+        
+        # Ensure model is properly normalized to [0,1] range
+        model_min = np.min(self.model)
+        model_max = np.max(self.model)
+        if model_max > model_min:  # Avoid division by zero
+            self.model = (self.model - model_min) / (model_max - model_min)
 
     def __str__(self):
         return f"star(R_S: {self.radius/km}km)"
@@ -196,7 +273,11 @@ class CustomStarModel:
             inclination=exoplanet.orbit.inclination,
             longitude_of_ascending_node=exoplanet.orbit.lan,
             argument_of_periapsis=exoplanet.orbit.argument_of_periapsis,
-            steps=steps
+            steps=steps,
+            angular_velocity=self.angular_velocity,
+            spot_longitude=self.spot.longitude,
+            spot_radius=self.spot.radius,
+            spot_brightness=self.spot.brightness
         )
 
     def transit_frames(self, exoplanet: Exoplanet, steps: int = 500):
@@ -217,49 +298,168 @@ class CustomStarModel:
             inclination=exoplanet.orbit.inclination,
             longitude_of_ascending_node=exoplanet.orbit.lan,
             argument_of_periapsis=exoplanet.orbit.argument_of_periapsis,
-            steps=steps
+            steps=steps,
+            angular_velocity=self.angular_velocity,
+            spot_longitude=self.spot.longitude,
+            spot_radius=self.spot.radius,
+            spot_brightness=self.spot.brightness
         )
 
+    def qimage(self):
+        return _array_to_qimage(self.model)
+
+    def display(self):
+        show_model(self.model)
+
 class Star(CustomStarModel):
-    def __init__(self, radius: Union[float, Measure.Unit], temperature: Union[float, Measure.Unit] = 8000, log_g: Union[float, Measure.Unit] = 4, wavelength: Union[float, Measure.Unit] = 4687, band='V', pixel=100_000, limb_darkening_model: str = 'square-root') -> None:
-        self.radius = radius # radius (R_S)
-        self.temperature = temperature # temperature
-        self.log_g = log_g # log(g)
+    def __init__(self, radius: Union[float, Measure.Unit], temperature: Union[float, Measure.Unit] = 8000, 
+                 log_g: Union[float, Measure.Unit] = 4, wavelength: Union[float, Measure.Unit] = 4687, 
+                 band: str = 'V', pixel: int = 100_000, limb_darkening_model: str = 'square-root',
+                 angular_velocity=0, spot: StarSpot = None) -> None:
+        """
+        Initialize a star with optional star spots.
+        
+        Args:
+            radius: Stellar radius in meters
+            temperature: Effective temperature in Kelvin
+            log_g: Surface gravity (log10 of surface gravity in cgs units)
+            wavelength: Wavelength in Angstroms for limb darkening
+            band: Photometric band (e.g., 'V', 'B', 'R')
+            pixel: Pixel scale in meters per pixel
+            limb_darkening_model: Type of limb darkening model ('square-root' or 'quadratic')
+            angular_velocity: The angular velocity of the star
+            spot: A stellar spot
+        """
+        self.radius = radius  # radius (R_S)
+        self.temperature = temperature  # temperature (T_eff)
+        self.log_g = log_g  # log(g)
         self.mass = star_mass(self.log_g, self.radius)
         self.wavelength = wavelength
         self.band = band
-        self.limb_darkening_model = limb_darkening_model # limb-darkening model
-
+        self.limb_darkening_model = limb_darkening_model.lower()
+        self.pixel = pixel
 
         try:
             if self.limb_darkening_model == 'quadratic':
                 try:
-                    c1, c2 = quadratic_limb_darkening[int(self.temperature)][float(self.log_g)][self.band] # quadratic limb-darkening coefficients (γ_1, γ_2)
+                    c1, c2 = quadratic_limb_darkening[int(self.temperature)][float(self.log_g)][self.band]  # γ_1, γ_2
                 except KeyError:
-                    raise KeyError(f'No available darkening coefficients for star with parameters T: {self.temperature/K}K log(g): {self.log_g} band: {self.band}')
+                    raise KeyError(
+                        f'No available darkening coefficients for star with parameters T: {self.temperature/K}K '
+                        f'log(g): {self.log_g} band: {self.band}'
+                    )
                 star_model = quadratic_star_model
 
             elif self.limb_darkening_model == 'square-root':
                 try:
-                    c1, c2 = square_root_limb_darkening[int(self.temperature)][float(self.log_g)][int(self.wavelength)] # square-root limb-darkening coefficients (γ_3, γ_4)
+                    c1, c2 = square_root_limb_darkening[int(self.temperature)][float(self.log_g)][int(self.wavelength)]  # γ_3, γ_4
                 except KeyError:
-                    raise KeyError(f'No available darkening coefficients for star with parameters T: {self.temperature/K}K log(g): {self.log_g} wavelength: {self.wavelength/angstrom}Å')
+                    raise KeyError(
+                        f'No available darkening coefficients for star with parameters T: {self.temperature/K}K '
+                        f'log(g): {self.log_g} wavelength: {self.wavelength/angstrom}Å'
+                    )
                 star_model = square_root_star_model
 
             else:
-                raise ValueError(f'Wrong limb darkening model selected: ' + self.limb_darkening_model)
+                raise ValueError(f'Unsupported limb darkening model: {self.limb_darkening_model}. '
+                               'Use "quadratic" or "square-root".')
 
         except IndexError:
-            raise ValueError(f'Wrong star parameter value selected (temperature [{self.temperature/K}K], log_g [{self.log_g}], wavelength [{self.wavelength}] or band [{self.band}]).\nTo see available parameter values check /limb_darkening.')
+            raise ValueError(
+                f'Invalid star parameters (T: {self.temperature/K}K, log(g): {self.log_g}, '
+                f'λ: {self.wavelength/angstrom}Å, band: {self.band}).\n'
+            )
 
-        super().__init__(star_model, self.radius, [c1, c2], pixel)
-
+        super().__init__(star_model, self.radius, self.log_g, [c1, c2], pixel, angular_velocity, spot)
 
     def __str__(self):
-        return f"star(R_S: {self.radius/km}km, T: {self.temperature/K}K, log_g: {self.log_g}, λ: {self.wavelength}Å, band: {self.band})"
+        return f"star(R_S: {self.radius/km}km, T: {self.temperature/K}K, log_g: {self.log_g}, λ: {self.wavelength}Å, ω_spot: {self.angular_velocity}°/s,  band: {self.band})"
 
 
 class Void:
     def __init__(self, **kwargs):
         for i in kwargs:
             self.__setattr__(i, kwargs[i])
+
+
+if __name__ == "__main__":
+    # Create a star spot with visible parameters
+    spot = StarSpot(radius=0.1, brightness=0.3, initial_longitude=90)
+    
+    # Create a star with proper parameters (radius in meters, with spot and rotation)
+    sun = Star(
+        radius=700_000 * km,  # Star radius in meters
+        temperature=5500 * K,
+        log_g=3.0,
+        wavelength=3437 * angstrom,
+        band='u',
+        pixel=10000 * km,  # Pixel size in meters
+        limb_darkening_model='quadratic',
+        angular_velocity=0.002,  # Rotation rate in degrees per second
+        spot=spot
+    )
+    
+    # Create an orbit that will result in a visible transit
+    # Parameters: sma (au), eccentricity, inclination (deg), longitude_of_ascending_node (deg), 
+    # argument_of_periapsis (deg), stellar_mass (kg), pixel_size (m)
+    # For edge-on transit (inclination=90°), planet should pass through star center
+    # But we need px_sma to be small enough that even at maximum projected distance, 
+    # the planet is within max_dist_for_transit
+    # With max_dist ~211px, let's use sma that gives px_sma ~150px to be safe
+    orbit = Orbit(
+        sma=0.005 * au,  # Very small - about 750,000 km (just slightly larger than star radius)
+        eccentricity=0.0,  # Circular orbit for simpler transit
+        inclination=0 * deg,  # Exactly edge-on for perfect transit
+        longitude_of_ascending_node=0 * deg,
+        argument_of_periapsis=0 * deg,
+        mass_sum=sun.mass,
+        pixel=10000 * km
+    )
+    
+    # Create a planet without rings for simplicity
+    # Make planet larger relative to star for more visible transit
+    exoplanet = Exoplanet(
+        orbit=orbit,
+        radius=100_000 * km,  # Larger planet radius (about 14% of star radius)
+        mass=1e26 * kg,  # Planet mass in kg
+        rings=None,  # No rings for this demo
+        pixel=10000 * km
+    )
+
+    # Generate transit frames
+    frames = sun.transit_frames(exoplanet, steps=200)
+    
+    if frames:
+        anim = visualization.FramesWindow(frames)
+        anim.save_gif('stellar_spots.gif')
+        print(f"Successfully created stellar_spots.gif with {len(frames)} frames")
+    else:
+        print("Error: No frames generated. Check transit parameters.")
+        print("Trying with a planet that has rings...")
+        
+        # Try with rings to see if that helps
+        rings = Rings(
+            density=0.02 * gcm3,
+            eccentricity=0.1,
+            sma=200_000 * km,
+            width=50_000 * km,
+            obliquity=0 * deg,
+            azimuthal_angle=0 * deg,
+            argument_of_periapsis=0 * deg,
+            mass=1 * kg,
+            specific_absorption_coefficient=2.3e-3 * (m**2/g)
+        )
+        planet_with_rings = Exoplanet(
+            orbit=orbit,
+            radius=100_000 * km,
+            mass=1e26 * kg,
+            rings=None,
+            pixel=10000 * km
+        )
+        frames = sun.transit_frames(planet_with_rings, steps=200)
+        if frames:
+            anim = visualization.FramesWindow(frames)
+            anim.save_gif('stellar_spots.gif')
+            print(f"Successfully created stellar_spots.gif with {len(frames)} frames (with rings)")
+        else:
+            print("Still no frames even with rings. Check orbit parameters.")

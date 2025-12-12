@@ -72,11 +72,7 @@ def calculate_data(exoplanet_sma: Union[float, Measure.Unit], exoplanet_orbit_ec
     orbit = Orbit(exoplanet_sma, exoplanet_orbit_eccentricity, exoplanet_orbit_inclination,
                   exoplanet_longitude_of_ascending_node, exoplanet_argument_of_periapsis, stellar_mass,
                   pixel_size)  # create exoplanet orbit
-    exoplanet = Exoplanet(rings, orbit, exoplanet_radius, exoplanet_mass, pixel_size)  # create exoplanet
-
-    print(exoplanet)
-
-    print(star)
+    exoplanet = Exoplanet(orbit, exoplanet_radius, exoplanet_mass, rings=rings, pixel=pixel_size)  # create exoplanet
 
     duration, data = star.transit(exoplanet)
 

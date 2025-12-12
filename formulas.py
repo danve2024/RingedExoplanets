@@ -122,7 +122,7 @@ def star_mass(star_log_g, star_radius) -> Union[float, Measure.Unit]:
     :param star_radius: R_S
     :return: M_S
     """
-    star_g = 10 ** star_log_g * (cm * s**2)
+    star_g = 10 ** star_log_g * (cm * s**(-2))
     return (star_g * star_radius ** 2) / G
 
 def orbital_period(sma, mass_sum) -> Union[float, Measure]:

@@ -370,69 +370,243 @@ class MCMC(emcee.EnsembleSampler):
         print("\nGenerating best-fit model vs. observed data plot...")
         best_fit_params = self.best_fit()
 
-        best_fit_model_output, transit_duration, _ = calculate_data(fixed_exoplanet_sma,
-                                                     best_fit_params[0],
-                                                     best_fit_params[1],
-                                                     best_fit_params[2],
-                                                     best_fit_params[3],
-                                                     best_fit_params[4],
-                                                     fixed_exoplanet_mass,
-                                                     roche_density(fixed_exoplanet_mass, best_fit_params[6], best_fit_params[5]),
-                                                     best_fit_params[5],
-                                                     best_fit_params[6],
-                                                     best_fit_params[7],
-                                                     np.nan,
-                                                     best_fit_params[8],
-                                                     best_fit_params[9],
-                                                     best_fit_params[10],
-                                                     fixed_specific_absorption_coefficient,
-                                                     fixed_star_object,
-                                                     fixed_pixel_size,
-                                                     custom_units=False
+        # Calculate model with best-fit parameters
+        best_fit_model_output, transit_duration, _ = calculate_data(
+            fixed_exoplanet_sma,
+            best_fit_params[0],  # exoplanet_orbit_eccentricity
+            best_fit_params[1],  # exoplanet_orbit_inclination
+            best_fit_params[2],  # exoplanet_longitude_of_ascending_node
+            best_fit_params[3],  # exoplanet_argument_of_periapsis
+            best_fit_params[4],  # exoplanet_radius
+            fixed_exoplanet_mass,
+            roche_density(fixed_exoplanet_mass, best_fit_params[6], best_fit_params[5]),  # density
+            best_fit_params[5],  # eccentricity
+            best_fit_params[6],  # sma
+            best_fit_params[7],  # width
+            np.nan,
+            best_fit_params[8],  # obliquity
+            best_fit_params[9],  # azimuthal_angle
+            best_fit_params[10],  # argument_of_periapsis
+            fixed_specific_absorption_coefficient,
+            fixed_star_object,
+            fixed_pixel_size,
+            custom_units=False
         )
-
+        
         best_fit_model_lightcurve = np.array(best_fit_model_output)
-
+        
+        # Process observations
         observed_phases = (self.observations[:, 0] - 0.5) * 0.5 * fixed_observations_duration / transit_duration + 0.5
         observed_magnitudes = self.observations[:, 1]
+        
+        # Get the model's phase range that overlaps with observations
         min_phase = np.maximum(np.min(observed_phases), np.min(best_fit_model_lightcurve[:, 0]))
         max_phase = np.minimum(np.max(observed_phases), np.max(best_fit_model_lightcurve[:, 0]))
+        
+        # Find intersection of model and observation phases
         intersection = (observed_phases >= min_phase) & (observed_phases <= max_phase)
         obs_phase_intersect = observed_phases[intersection]
         obs_mag_intersect = observed_magnitudes[intersection]
+        
+        # Interpolate model to match observation phases
+        model_interp = np.interp(
+            obs_phase_intersect,
+            best_fit_model_lightcurve[:, 0],
+            best_fit_model_lightcurve[:, 1]
+        )
+        residuals = obs_mag_intersect - model_interp
+        
+        # Create figure with two subplots
+        fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 8), 
+                                     gridspec_kw={'height_ratios': [2, 1]},
+                                     sharex=True)
+        
+        # Top panel: Data and model
+        ax1.plot(obs_phase_intersect, obs_mag_intersect, 'o', 
+                color='blue', markersize=3, alpha=0.5, label='Observed Data')
+        ax1.plot(best_fit_model_lightcurve[:, 0], best_fit_model_lightcurve[:, 1], 
+                '-', color='black', linewidth=2, label='Best-Fit Model')
+        ax1.set_ylabel(y_label)
+        ax1.legend()
+        ax1.set_title(title)
+        ax1.grid(True)
+        if invert_y:
+            ax1.invert_yaxis()
 
-        plt.figure(figsize=(12, 7))
-        plt.plot(obs_phase_intersect,obs_mag_intersect, 'o', color='gray', markersize=3,
-                 label='Observed Data', alpha=0.5)
-        plt.plot(best_fit_model_lightcurve[:, 0], best_fit_model_lightcurve[:, 1], '-', color='red', linewidth=2,
-                 label='Best-Fit Model')
-        plt.xlabel(x_label)
-        plt.ylabel(y_label)
-        plt.title(title)
-        plt.grid(True)
-        plt.legend()
+        # Bottom panel: Residuals
+        ax2.plot(obs_phase_intersect, residuals, 'o', 
+                color='red', markersize=3, alpha=0.5)
+        ax2.axhline(0, color='black', linestyle='-', linewidth=1)
+        ax2.set_xlabel(x_label)
+        ax2.set_ylabel('Residuals')
+        ax2.grid(True)
+
+        plt.tight_layout()
+        
         if invert_x:
             plt.gca().invert_xaxis()
-        if invert_y:
-            plt.gca().invert_yaxis()
-        plt.savefig(filename)
+            
+        plt.savefig(filename, dpi=300, bbox_inches='tight')
         plt.close()
         print(f"Best-fit model vs. observed data plot saved to {filename}")
 
+    def sample_prior(self, nsamples=1000):
+        """Sample from the prior distribution."""
+        samples = np.zeros((nsamples, self.ndim))
+        for i, (param_name, (low, high)) in enumerate(specific_parameter_boundaries.items()):
+            samples[:, i] = np.random.uniform(low, high, size=nsamples)
+        return samples
+        
     def corner_plot(self, filename: str = 'corner_plot.png'):
-        fig_corner = corner.corner(
-            self.get_display_samples(),
-            labels=self.labels,
-            quantiles=[0.16, 0.5, 0.84],
-            show_titles=True,
-            title_fmt=".2f",
-            title_kwargs={"fontsize": 10},
-            fill_contours=True,
-            smooth=True,
-        )
+        """Create a corner plot showing both prior and posterior distributions."""
+        import warnings
+        warnings.filterwarnings('ignore', message='Too few points to create valid contours')
+        
+        # Get posterior samples
+        post_samples = self.get_display_samples()
+        if len(post_samples) == 0:
+            print("Warning: No posterior samples available for corner plot.")
+            return
+            
+        # Get prior samples
+        prior_samples = self.sample_prior(len(post_samples))
+        
+        # Convert prior samples to display units
+        display_prior = np.copy(prior_samples)
+        for i, label in enumerate(self.labels):
+            if label in self.display_units:
+                factor = self.display_units[label]
+                display_prior[:, i] /= factor
+        
+        # Calculate ranges for each parameter
+        ranges = []
+        for i in range(self.ndim):
+            post_min, post_max = np.min(post_samples[:, i]), np.max(post_samples[:, i])
+            prior_min, prior_max = np.min(display_prior[:, i]), np.max(display_prior[:, i])
+            
+            # Handle case where all values are the same
+            if post_min == post_max and prior_min == prior_max:
+                # If both are single values, create a small range around them
+                val = post_min if np.isfinite(post_min) else prior_min
+                if not np.isfinite(val):
+                    val = 0.0
+                ranges.append((val - 0.5, val + 0.5))
+            else:
+                # Use the combined range with padding
+                min_val = min(post_min, prior_min) if np.isfinite(post_min) and np.isfinite(prior_min) \
+                    else (post_min if np.isfinite(post_min) else prior_min)
+                max_val = max(post_max, prior_max) if np.isfinite(post_max) and np.isfinite(prior_max) \
+                    else (post_max if np.isfinite(post_max) else prior_max)
+                
+                # Ensure we have a valid range
+                if not np.isfinite(min_val) or not np.isfinite(max_val) or min_val == max_val:
+                    val = 0.0 if not np.isfinite(min_val) else min_val
+                    ranges.append((val - 0.5, val + 0.5))
+                else:
+                    # Add 5% padding, but ensure we don't create invalid ranges
+                    padding = max(0.05 * (max_val - min_val), 1e-10)
+                    ranges.append((min_val - padding, max_val + padding))
+        
+        try:
+            # Create figure with posterior (don't show contours if too few points)
+            fig = corner.corner(
+                post_samples,
+                labels=self.labels,
+                quantiles=[0.16, 0.5, 0.84],
+                show_titles=True,
+                title_fmt=".2f",
+                title_kwargs={"fontsize": 10},
+                fill_contours=len(post_samples) > 50,  # Only fill contours if enough points
+                smooth=1.0 if len(post_samples) > 50 else 0.0,  # Disable smoothing for small samples
+                color='blue',
+                alpha=0.5,
+                label='Posterior',
+                range=ranges,
+                plot_datapoints=len(post_samples) <= 1000,  # Only plot points if not too many
+                plot_density=len(post_samples) > 10,  # Only plot density if enough points
+                no_fill_contours=len(post_samples) <= 50  # Don't fill contours for small samples
+            )
+            
+            # Add prior samples
+            corner.corner(
+                display_prior,
+                fig=fig,
+                color='red',
+                alpha=0.3,
+                label='Prior',
+                range=ranges,
+                plot_datapoints=False,
+                plot_density=len(prior_samples) > 10,
+                no_fill_contours=True
+            )
+            
+            # Add a more visible legend
+            try:
+                axes = np.array(fig.axes).reshape((self.ndim, self.ndim))
+                if axes.size > 0 and hasattr(axes[0, 0], 'legend'):
+                    # Create custom legend handles
+                    import matplotlib.patches as mpatches
+                    posterior_patch = mpatches.Patch(color='blue', alpha=0.5, label='Posterior (MCMC samples)')
+                    prior_patch = mpatches.Patch(color='red', alpha=0.3, label='Prior (uniform)')
+                    
+                    # Add legend to the first subplot
+                    leg = axes[0, 0].legend(
+                        handles=[posterior_patch, prior_patch],
+                        loc='upper right',
+                        frameon=True,
+                        framealpha=0.9,
+                        edgecolor='black',
+                        fancybox=True,
+                        fontsize=10,
+                        title='Distributions',
+                        title_fontsize=11
+                    )
+                    
+                    # Make the legend background more visible
+                    leg.get_frame().set_facecolor('white')
+                    leg.get_frame().set_linewidth(0.8)
+                    
+            except Exception as e:
+                print(f"Warning: Could not add legend: {e}")
+            
+            plt.savefig(filename, dpi=300, bbox_inches='tight')
+            plt.close(fig)
+            print(f"Corner plot with priors saved to {filename}")
+            
+        except Exception as e:
+            print(f"Error generating corner plot: {e}")
+            print("Trying fallback with simplified parameters...")
+            # Fallback: Try plotting just the first few parameters
+            try:
+                n_params = min(5, self.ndim)  # Try with fewer parameters
+                fig = corner.corner(
+                    post_samples[:, :n_params],
+                    labels=self.labels[:n_params],
+                    show_titles=True,
+                    title_fmt=".2f",
+                    color='blue',
+                    alpha=0.5
+                )
+                plt.savefig(filename.replace('.png', '_reduced.png'), dpi=300, bbox_inches='tight')
+                plt.close()
+                print(f"Reduced corner plot saved to {filename.replace('.png', '_reduced.png')}")
+            except Exception as e2:
+                print(f"Failed to generate reduced corner plot: {e2}")
+        
+        # Re-enable warnings
+        warnings.filterwarnings('default')
+
+    def corellation_matrix(self):
+        dataframe = pd.DataFrame(self.get_display_samples(), columns=self.labels)
+        return dataframe.corr()
+
+    def correlation_heatmap(self, filename: str = "correlation_heatmap.png", title="Correlation Heatmap"):
+        sns.heatmap(self.corellation_matrix(), annot=True, cmap='coolwarm', center=0)
+        plt.title(title)
+        plt.figure(figsize=(16, 16))
         plt.savefig(filename)
-        plt.close(fig_corner)
-        print(f"Corner plot saved to {filename}")
+        plt.close()
+        print(f"Correlation matrix saved to {filename}")
 
 class SingleParameterMCMC(MCMC):
     def __init__(self, vary_index: int, nwalkers: int, iterations: int, burn_in: int, thinning: int, files: dict, labels: list[str], initial_guesses: Union[list, np.ndarray]):
@@ -445,6 +619,36 @@ class SingleParameterMCMC(MCMC):
         val = self.fixed_values
         val[self.vary_index] = params[0]
         return super().log_posterior(val)
+
+def apply_burnin_thin_flat(chain: np.ndarray, burn_in: int = 500, thin: int = 10, flat: bool = True) -> np.ndarray:
+    """
+    Apply burn-in and thinning along the step axis of a 3D chain array with shape (n_steps, n_walkers, n_dim).
+    """
+    if chain.ndim != 3:
+        raise ValueError(f"Expected chain with shape (steps, walkers, ndim), got {chain.shape}")
+    steps = chain.shape[0]
+    if burn_in < 0 or burn_in >= steps:
+        raise ValueError("burn_in must be >= 0 and < number of steps")
+    if thin <= 0:
+        raise ValueError("thin must be >= 1")
+    chain_sliced = chain[burn_in::thin, :, :]
+    if flat:
+        chain_sliced = chain_sliced.reshape(-1, chain_sliced.shape[-1])
+    return chain_sliced
+
+def corellation_matrix(chain: np.ndarray, labels: list[str], burn_in: int = 500, thin: int = 10, flat: bool = True) -> np.ndarray:
+    samples = apply_burnin_thin_flat(chain, burn_in, thin, flat)
+    dataframe = pd.DataFrame(samples, columns=labels)
+    return dataframe.corr()
+
+def correlation_heatmap(chain: np.ndarray, labels: list[str], burn_in: int = 500, thin: int = 10, flat: bool = True, filename: str = "correlation_heatmap.png", title="Correlation Heatmap"):
+    matrix = corellation_matrix(chain, labels, burn_in, thin, flat)
+    plt.figure(figsize=(16, 16))
+    sns.heatmap(matrix, annot=True, cmap='coolwarm', fmt=".2f")
+    plt.title(title)
+    plt.savefig(filename)
+    plt.close()
+    print(f"Correlation matrix saved to {filename}")
 
 fixed_pixel_size = defaults['pixel_size']
 
@@ -497,7 +701,7 @@ if __name__ == "__main__":
                         ],
                    initial_guesses=guessed_parameter_values)
 
-    mcmc = MCMC(ndim=11, nwalkers=50, iterations=10000, burn_in=500, thinning=10,
+    mcmc = MCMC(ndim=11, nwalkers=50, iterations=10, burn_in=0, thinning=1,
                    files={
                             "C18 short cadence": ("observations/C18_short_cadence.csv", "red"),
                             "C18 long cadence": ("observations/C18_long_cadence.csv", "green"),
@@ -516,10 +720,12 @@ if __name__ == "__main__":
     mcmc.run()
     mcmc.save_chain()
     mcmc.trace_plots()  # plotting the chains for diagnostics
-    mcmc.posterior_diagrams()  # plotting histograms of the posterior distributions
+#    mcmc.posterior_diagrams()  # plotting histograms of the posterior distributions
+    mcmc.correlation_heatmap()
     statistics = mcmc.summary()  # obtaining parameter values
     print(f'Parameter Values:\n{statistics}')
-    with open('summary.txt', 'w', encoding='utf-8') as file:
+    with open('summary.txt', 'w', encoding='utf'
+                                           '-8') as file:
         file.write(statistics)
     mcmc.best_fit_vs_observations()
     mcmc.corner_plot()  # generate corner plot
