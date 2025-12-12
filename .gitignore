@@ -3,6 +3,7 @@
 __pycache__/
 venv/
 tasks/
+starry_env/
 .DS_Store
 sandbox.py
 tasks.py
