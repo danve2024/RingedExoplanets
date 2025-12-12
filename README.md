@@ -88,9 +88,6 @@ The minimum configuration in `nested_sampling.py` includes:
 
 - **`observations.py`** - `Observations` class for loading and processing observation data from CSV files. Handles time and magnitude shifts, normalization, and data manipulation for comparison with models.
 
-- **`extract_raw_data.py`**, **`extract_raw_floats.py`**, **`extract_samples.py`** - Utilities for extracting and processing raw data from various formats (binary, numpy arrays, etc.)
-
-- **`inspect_*.py`** - Various inspection utilities for examining data files, binary formats, and numpy arrays.
 
 ### Visualization
 
