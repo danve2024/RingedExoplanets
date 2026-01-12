@@ -1,10 +1,10 @@
 from nested_sampling import ns
 
-chunks = 20
-splits = 8
-offset = 5
+chunks = 14
+splits = 5
+offset = 4
 
-for i in range(1, splits):
+for i in range(4, splits):
     ns.kfold_split(chunks, [i + offset], f'kfolds/{i}/kfold_observations.jpg')
     ns.update(f'loglikes/kfold{i}.json')
     results = ns.run()

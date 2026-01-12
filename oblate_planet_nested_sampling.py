@@ -8,7 +8,7 @@ param_bounds = {
     'exoplanet_longitude_of_ascending_node': (90 - 5e-8, 90 + 5e-8),
     'exoplanet_argument_of_periapsis': (0, 180),
     'exoplanet_radius': (2000 * km, 20 * 6400 * km),
-    'oblateness': (0, 1),
+    'oblateness': (0, 0.9),
     'rotation': (0, 180)
 }
 

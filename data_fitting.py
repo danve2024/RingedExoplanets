@@ -11,6 +11,7 @@ from main import calculate_data, defaults
 from models import quadratic_star_model
 from units import *
 from space import CustomStarModel
+from scipy.constants import G
 
 invalid = False
 

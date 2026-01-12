@@ -158,6 +158,7 @@ def elliptical_ring(
 
     return transmission_map
 
+
 def quadratic_star_model(shape: list[int], coefficients: list[float]) -> np.array:
     """
     See formulas 2.2.27 - 2.2.30.

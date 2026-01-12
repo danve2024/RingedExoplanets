@@ -1,7 +1,6 @@
 from models import disk, elliptical_ring, _array_to_qimage, planet
 import numpy as np
 from main import calculate_data, defaults
-from nested_sampling import fixed_exoplanet_sma, fixed_exoplanet_mass
 from visualization import FramesWindow
 from space import Star, Orbit, Exoplanet
 from PyQt6.QtGui import QImage
@@ -312,4 +311,4 @@ def draw_noisy_light_curve_animation(gif=False, name='animation', **kwargs):
     draw_animation(draw_noisy_light_curve, gif, name, **kwargs)
 
 if __name__ == '__main__':
-    draw_noisy_light_curve_animation(noise_scale=(0,0.2,20), gif=True)
+    draw_ring_animation(size=[1000], fixed_R=4.6, fixed_a=270, fixed_e=0.418, fixed_w=37.4, fixed_theta=0.969, fixed_phi=56.448, fixed_psi=42.773, fixed_tau=0.59, infinity=50)

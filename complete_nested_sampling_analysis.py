@@ -276,32 +276,33 @@ class NestedSamplingAnalysis:
         ans += f"\nLog-evidence: {self.logz[-1]:.2f} +/- {np.std(self.logz):.2f}\n"
         
         return ans
-    
+
     def corner_plot(self, filename: str = 'corner_plot.png', n_prior_samples: int = 1000):
         """
         Create a corner plot showing both prior and posterior distributions.
         """
         print("\nGenerating corner plot...")
-        
+
         try:
             # Get posterior samples
             post_samples = self.get_posterior_samples()
-            
+
             if post_samples is None or len(post_samples) == 0:
                 print("No posterior samples available for corner plot.")
                 return
-            
-            # Generate prior samples
-            prior_samples = self.sample_prior(n_prior_samples)
-            
-            # Calculate ranges using min/max with padding
+
+            ndim = post_samples.shape[1]
+            # Access the boundaries defined in the global specific_parameter_boundaries
+            param_bounds = list(specific_parameter_boundaries.values())
+
+            # Calculate ranges using min/max with padding to focus on the posterior
             ranges = []
-            for i in range(post_samples.shape[1]):
+            for i in range(ndim):
                 min_val, max_val = np.min(post_samples[:, i]), np.max(post_samples[:, i])
                 padding = 0.1 * (max_val - min_val) if max_val != min_val else 0.1
                 ranges.append((min_val - padding, max_val + padding))
-            
-            # Create the corner plot with posterior only first
+
+            # Create the corner plot
             fig = corner.corner(
                 post_samples,
                 labels=self.labels,
@@ -310,6 +311,7 @@ class NestedSamplingAnalysis:
                 title_fmt=".3f",
                 title_kwargs={"fontsize": 10},
                 label_kwargs={"fontsize": 12},
+                labelpad=0.25,  # Increased padding to move labels down
                 plot_datapoints=True,
                 plot_density=True,
                 plot_contours=True,
@@ -321,18 +323,33 @@ class NestedSamplingAnalysis:
                 smooth1d=1.0,
                 range=ranges
             )
-            
-            # Add title
-            fig.suptitle('Parameter Distributions', y=0.98, fontsize=16)
-            
-            # Create directory if it doesn't exist
+
+            # Add uniform prior lines to the 1D histograms (the diagonal)
+            axes = np.array(fig.axes).reshape((ndim, ndim))
+            for i in range(ndim):
+                ax = axes[i, i]
+                low, high = param_bounds[i]
+
+                # The height of a normalized uniform distribution is 1 / range
+                prior_height = 1.0 / (high - low)
+
+                # Plot the prior as a thick blue line
+                # Note: Only the portion within the 'range' of the axis will be visible
+                ax.plot([low, high], [prior_height, prior_height],
+                        color='blue', linestyle='-', linewidth=2.5,
+                        label='Uniform Prior', alpha=0.7)
+
+            # Add a global title
+            fig.suptitle('Corner Plot for Posterior Distributions vs. Uniform Priors', y=1.02, fontsize=16)
+
+            # Ensure output directory exists
             os.makedirs(os.path.dirname(os.path.abspath(filename)), exist_ok=True)
-            
-            # Save the figure
+
+            # Save the figure with tight bounding box to prevent label truncation
             plt.savefig(filename, dpi=150, bbox_inches='tight', facecolor='white')
             plt.close()
-            print(f"Corner plot saved to {os.path.abspath(filename)}")
-            
+            print(f"Corner plot with prior overlays saved to {os.path.abspath(filename)}")
+
         except Exception as e:
             print(f"Error generating corner plot: {str(e)}")
             raise
@@ -629,7 +646,5 @@ class NestedSamplingAnalysis:
         return stats
 
 if __name__ == "__main__":
-    # Initialize and run the complete analysis
-    analyzer = NestedSamplingAnalysis('kfolds/0/nested_sampling_result.npz')
-    analyzer.kfold_split(20, [5])
-    analyzer.analyze('kfolds/0/')
+    nsa = NestedSamplingAnalysis('nested_sampling_run/nested_sampling_results.npz')
+    nsa.analyze('nested_sampling_run/')

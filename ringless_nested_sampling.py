@@ -7,7 +7,7 @@ ringless_parameter_boundaries = {
     'exoplanet_orbit_inclination': (0, 90),
     'exoplanet_longitude_of_ascending_node': (90 - 5e-8, 90 + 5e-8),
     'exoplanet_argument_of_periapsis': (0, 180),
-    'exoplanet_radius': (2000 * km, 20 * 6400 * km)
+    'exoplanet_radius': (46170 * km, 20 * 6400 * km)
 }
 
 def call(params):
@@ -25,7 +25,7 @@ def call(params):
         )
     return best_fit_model_output, transit_duration, exoplanet_obj
 
-nlive = 500
+nlive = 2000
 ndim = 5
 
 # Initialize and run the nested sampler

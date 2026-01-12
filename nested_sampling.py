@@ -195,6 +195,10 @@ class NestedSampler:
             model_output, transit_duration, exoplanet_obj = self(params)
             model_lightcurve = np.array(model_output)
 
+            if transit_duration == 0:
+                self.loglikes[key] = -np.inf
+                return -np.inf
+
             if model_lightcurve.shape[0] < 2:
                 self.loglikes[key] = -np.inf
                 return -np.inf
@@ -488,8 +492,17 @@ class NestedSampler:
                 # Get the phases corresponding to this dataset
                 dataset_phases = phases[start_index:end_index]
                 dataset_mag_changes = all_mag_changes[start_index:end_index]
+                match color:
+                    case 'red':
+                        point_style = '.'
+                    case 'blue':
+                        point_style = '^'
+                    case 'green':
+                        point_style = 's'
+                    case _:
+                        point_style = 'o'
 
-                plt.plot(dataset_phases, dataset_mag_changes, 'o',
+                plt.plot(dataset_phases, dataset_mag_changes, point_style,
                          markersize=3, color=color, label=label, alpha=0.7)
                 start_index = end_index
             except FileNotFoundError:
@@ -645,6 +658,7 @@ class NestedSampler:
             sample = self.best_fit_params.copy()
             for i in range(len(sample)):
                 sample[i] = random.uniform(sample[i] * (1 - deviation), sample[i] * (1 + deviation))
+            sample[2] = 90.
             best_fit_model_output, transit_duration, _ = self(sample)
 
             model_lightcurve = np.array(best_fit_model_output)
